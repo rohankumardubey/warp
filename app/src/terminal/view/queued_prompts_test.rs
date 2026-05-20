@@ -11,10 +11,6 @@ fn user_query(text: &str) -> QueuedQuery {
     QueuedQuery::new(text.to_owned(), QueuedQueryOrigin::QueueSlashCommand)
 }
 
-fn cloud_query(text: &str) -> QueuedQuery {
-    QueuedQuery::new(text.to_owned(), QueuedQueryOrigin::InitialCloudMode)
-}
-
 #[test]
 fn complete_drain_pops_head_and_returns_submit_action() {
     // On Complete, the next queued prompt fires via Submit.
@@ -68,20 +64,30 @@ fn complete_drain_with_first_row_in_edit_mode_returns_pop_from_edit_mode() {
 }
 
 #[test]
-fn complete_drain_skips_initial_cloud_mode_head() {
-    // The harness owns Cloud Mode firing; auto-fire does not pop it.
+fn complete_drain_with_non_empty_input_preserves_edited_head_row() {
+    // The host skips autofire when the queue head is being edited and the input already contains
+    // text, which leaves the queued row in place for the next completion.
     App::test((), |mut app| async move {
         let model = app.add_model(|_| QueuedQueryModel::new());
         let conv = AIConversationId::new();
+        let id_a = model.update(&mut app, |m, ctx| m.append(conv, user_query("first"), ctx));
         model.update(&mut app, |m, ctx| {
-            m.append(conv, cloud_query("cloud"), ctx);
-            m.append(conv, user_query("user"), ctx);
+            m.append(conv, user_query("second"), ctx);
+            m.enter_edit_mode(conv, id_a, ctx);
         });
 
-        let action = model.update(&mut app, |m, ctx| m.pop_for_autofire(conv, None, ctx));
-        assert!(action.is_none(), "Cloud Mode head must not auto-fire");
+        let simulated_input_is_non_empty = true;
+        if !(simulated_input_is_non_empty
+            && model.read(&app, |m, _| m.first_row_is_in_edit_mode(conv)))
+        {
+            model.update(&mut app, |m, ctx| m.pop_for_autofire(conv, None, ctx));
+        }
+
         model.read(&app, |m, _| {
+            assert_eq!(m.editing_row(conv), Some(id_a));
             assert_eq!(m.queue_for(conv).len(), 2);
+            assert_eq!(m.queue_for(conv)[0].text(), "first");
+            assert_eq!(m.queue_for(conv)[1].text(), "second");
         });
     });
 }
@@ -108,35 +114,12 @@ fn error_or_cancel_drain_pops_front_when_input_is_empty() {
             m.append(conv, user_query("second"), ctx);
         });
 
-        let popped = model.update(&mut app, |m, ctx| m.pop_front_user_managed(conv, ctx));
+        let popped = model.update(&mut app, |m, ctx| m.pop_front(conv, ctx));
         let popped = popped.expect("queue had a head");
         assert_eq!(popped.text(), "first");
         model.read(&app, |m, _| {
             assert_eq!(m.queue_for(conv).len(), 1);
             assert_eq!(m.queue_for(conv)[0].text(), "second");
-        });
-    });
-}
-
-#[test]
-fn error_or_cancel_drain_skips_initial_cloud_mode_head() {
-    App::test((), |mut app| async move {
-        let model = app.add_model(|_| QueuedQueryModel::new());
-        let conv = AIConversationId::new();
-        model.update(&mut app, |m, ctx| {
-            m.append(conv, cloud_query("cloud"), ctx);
-            m.append(conv, user_query("user"), ctx);
-        });
-
-        let popped = model.update(&mut app, |m, ctx| m.pop_front_user_managed(conv, ctx));
-        assert!(popped.is_none(), "Cloud Mode head must stay harness-owned");
-        model.read(&app, |m, _| {
-            assert_eq!(m.queue_for(conv).len(), 2);
-            assert_eq!(
-                m.queue_for(conv)[0].origin(),
-                QueuedQueryOrigin::InitialCloudMode
-            );
-            assert_eq!(m.queue_for(conv)[1].text(), "user");
         });
     });
 }
@@ -157,7 +140,7 @@ fn error_or_cancel_drain_leaves_queue_intact_when_input_is_non_empty() {
 
         let simulated_input_is_non_empty = true;
         if !simulated_input_is_non_empty {
-            model.update(&mut app, |m, ctx| m.pop_front_user_managed(conv, ctx));
+            model.update(&mut app, |m, ctx| m.pop_front(conv, ctx));
         }
 
         model.read(&app, |m, _| {
@@ -181,7 +164,7 @@ fn complete_drain_after_error_drain_continues_with_next_row() {
         });
 
         // Error: input is empty, pop "first" and restore to input.
-        let popped = model.update(&mut app, |m, ctx| m.pop_front_user_managed(conv, ctx));
+        let popped = model.update(&mut app, |m, ctx| m.pop_front(conv, ctx));
         assert_eq!(popped.map(|q| q.into_text()), Some("first".to_owned()));
 
         // Complete: pop "second".

@@ -12128,9 +12128,8 @@ impl Workspace {
                     });
 
                 if let Some(prompt) = initial_prompt {
-                    terminal_view.enqueue_prompt(
+                    terminal_view.send_user_query_after_next_conversation_finished(
                         prompt,
-                        crate::ai::blocklist::QueuedQueryOrigin::ForkAndCompact,
                         terminal_view_ctx,
                     );
                 }
@@ -12224,11 +12223,7 @@ impl Workspace {
             });
 
             if let Some(prompt) = initial_prompt {
-                terminal.enqueue_prompt(
-                    prompt,
-                    crate::ai::blocklist::QueuedQueryOrigin::CompactAnd,
-                    ctx,
-                );
+                terminal.send_user_query_after_next_conversation_finished(prompt, ctx);
             }
         });
     }

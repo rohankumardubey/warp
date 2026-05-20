@@ -1212,9 +1212,6 @@ pub enum LoginEventSource {
 pub enum TelemetryQueuedQueryOrigin {
     QueueSlashCommand,
     AutoQueueToggle,
-    CompactAnd,
-    ForkAndCompact,
-    InitialCloudMode,
 }
 
 impl From<QueuedQueryOrigin> for TelemetryQueuedQueryOrigin {
@@ -1222,9 +1219,6 @@ impl From<QueuedQueryOrigin> for TelemetryQueuedQueryOrigin {
         match origin {
             QueuedQueryOrigin::QueueSlashCommand => Self::QueueSlashCommand,
             QueuedQueryOrigin::AutoQueueToggle => Self::AutoQueueToggle,
-            QueuedQueryOrigin::CompactAnd => Self::CompactAnd,
-            QueuedQueryOrigin::ForkAndCompact => Self::ForkAndCompact,
-            QueuedQueryOrigin::InitialCloudMode => Self::InitialCloudMode,
         }
     }
 }
@@ -5858,7 +5852,7 @@ impl TelemetryEventDesc for TelemetryEventDiscriminants {
             | Self::QueuedPromptDeleted
             | Self::QueuedPromptReordered
             | Self::QueuedPromptPanelCollapseToggled => {
-                EnablementState::Flag(FeatureFlag::NewQueuedPromptUI)
+                EnablementState::Flag(FeatureFlag::QueueSlashCommand)
             }
         }
     }

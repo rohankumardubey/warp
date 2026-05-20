@@ -25,7 +25,6 @@ use crate::ai::blocklist::handoff::touched_repos::TouchedWorkspace;
 #[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
 use crate::ai::blocklist::handoff::PendingCloudLaunch;
 use crate::ai::blocklist::BlocklistAIHistoryModel;
-use crate::ai::blocklist::QueuedQueryId;
 use crate::ai::cloud_environments::CloudAmbientAgentEnvironment;
 use crate::ai::execution_profiles::{CloudAgentComputerUseState, ComputerUsePermission};
 use crate::ai::harness_availability::HarnessAvailabilityModel;
@@ -235,10 +234,6 @@ pub struct AmbientAgentViewModel {
     harness_reasoning_level: Option<String>,
     /// Name of the selected auth secret for the current non-Oz harness.
     harness_auth_secret_name: Option<String>,
-    /// Id of the queued-query row appended to `QueuedQueryModel` for the non-oz run
-    /// initial prompt, used to remove the row on terminal/transition events without
-    /// needing the conversation id again.
-    cloud_mode_queued_query_id: Option<QueuedQueryId>,
     /// Whether the harness CLI (e.g. `claude`, `gemini`) has started running for a non-oz run.
     /// Used to transition the cloud-mode setup UI out of the pre-first-exchange phase when
     /// there is no oz `AppendedExchange` to key off of.
@@ -316,7 +311,6 @@ impl AmbientAgentViewModel {
             harness_model_id: None,
             harness_reasoning_level: None,
             harness_auth_secret_name: None,
-            cloud_mode_queued_query_id: None,
             harness_command_started: false,
             active_execution_session_id: None,
             last_ended_execution_session_id: None,
@@ -324,14 +318,6 @@ impl AmbientAgentViewModel {
             #[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
             pending_handoff: None,
         }
-    }
-
-    pub fn cloud_mode_queued_query_id(&self) -> Option<QueuedQueryId> {
-        self.cloud_mode_queued_query_id
-    }
-
-    pub fn set_cloud_mode_queued_query_id(&mut self, id: Option<QueuedQueryId>) {
-        self.cloud_mode_queued_query_id = id;
     }
 
     pub fn request(&self) -> Option<&SpawnAgentRequest> {
@@ -1051,7 +1037,6 @@ impl AmbientAgentViewModel {
         self.conversation_id = None;
         self.harness_model_id = None;
         self.harness_reasoning_level = None;
-        self.cloud_mode_queued_query_id = None;
         self.harness_command_started = false;
         self.active_execution_session_id = None;
         self.last_ended_execution_session_id = None;

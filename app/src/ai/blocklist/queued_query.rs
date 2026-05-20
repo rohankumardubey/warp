@@ -17,32 +17,13 @@ impl QueuedQueryId {
 }
 
 /// Where a queued prompt came from.
-/// The origin is informational (telemetry, render rules, debug); the FIFO ordering and firing
-/// semantics are uniform across origins.
+/// The origin is informational for telemetry; FIFO ordering and firing semantics are uniform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum QueuedQueryOrigin {
     /// Filed via the `/queue <prompt>` slash command.
     QueueSlashCommand,
     /// Filed via the auto-queue toggle in the warping indicator.
     AutoQueueToggle,
-    /// Filed via `/compact-and <prompt>`.
-    /// The summarization itself is dispatched immediately at file time; the prompt fires after.
-    CompactAnd,
-    /// Filed via `/fork-and-compact <prompt>`.
-    /// The fork + summarization is dispatched immediately at file time; the prompt fires after.
-    ForkAndCompact,
-    /// The initial prompt for a non-Oz Cloud Mode run waiting for its harness CLI to start.
-    /// Owned by the harness lifecycle; the queue panel renders it without edit / delete /
-    /// reorder affordances and the auto-fire path skips it.
-    InitialCloudMode,
-}
-
-impl QueuedQueryOrigin {
-    /// Returns true for rows that should be displayed but never auto-fired by the queue
-    /// drain or mutated by the user (the harness owns their lifecycle).
-    pub fn is_user_managed(self) -> bool {
-        !matches!(self, QueuedQueryOrigin::InitialCloudMode)
-    }
 }
 
 /// A single queued prompt.
@@ -85,8 +66,7 @@ pub enum AutofireAction {
     /// Submit this prompt as a normal queued user query.
     Submit { text: String },
     /// The popped row was in edit mode at the time of pop.
-    /// The caller should place `text` in the input box only if the input is empty;
-    /// otherwise discard it.
+    /// The caller places `text` in the input box after deciding it is safe to pop the edited row.
     PopFromEditMode { text: String },
 }
 
@@ -194,6 +174,17 @@ impl QueuedQueryModel {
             .map(|e| e.query_id)
     }
 
+    /// Returns true when the first queued row for `conversation_id` is currently being edited.
+    pub fn first_row_is_in_edit_mode(&self, conversation_id: AIConversationId) -> bool {
+        let Some(editing_row_id) = self.editing_row(conversation_id) else {
+            return false;
+        };
+        self.queues
+            .get(&conversation_id)
+            .and_then(|queue| queue.first())
+            .is_some_and(|query| query.id == editing_row_id)
+    }
+
     /// Returns true if the queue panel for `conversation_id` is collapsed.
     pub fn is_collapsed(&self, conversation_id: AIConversationId) -> bool {
         self.collapsed.contains(&conversation_id)
@@ -253,23 +244,10 @@ impl QueuedQueryModel {
         });
         Some(popped)
     }
-    /// Pops the first row only when the row is user-managed.
-    pub fn pop_front_user_managed(
-        &mut self,
-        conversation_id: AIConversationId,
-        ctx: &mut ModelContext<Self>,
-    ) -> Option<QueuedQuery> {
-        let first = self.queues.get(&conversation_id)?.first()?;
-        if !first.origin.is_user_managed() {
-            return None;
-        }
-        self.pop_front(conversation_id, ctx)
-    }
 
     /// Auto-fire drain entry point.
-    /// Returns `None` for empty queues and for `InitialCloudMode` rows at the head; otherwise
-    /// pops the first row and returns whether the caller should submit it normally or treat
-    /// it as a popped edit-mode row.
+    /// Returns `None` for empty queues; otherwise pops the first row and returns whether the caller
+    /// should submit it normally or treat it as a popped edit-mode row.
     ///
     /// `edit_text_override` lets the caller pass the live editor buffer text when the first
     /// row is in edit mode (the model only tracks committed row text).
@@ -282,9 +260,6 @@ impl QueuedQueryModel {
         let (mut popped, first_in_edit_mode) = {
             let queue = self.queues.get_mut(&conversation_id)?;
             let first = queue.first()?;
-            if !first.origin.is_user_managed() {
-                return None;
-            }
 
             let first_in_edit_mode = self
                 .editing
@@ -342,7 +317,7 @@ impl QueuedQueryModel {
     }
 
     /// Replaces the text of a specific row by id, if present.
-    /// No-op when `query_id` does not exist or the row's origin is not user-managed.
+    /// No-op when `query_id` does not exist.
     pub fn replace_text_by_id(
         &mut self,
         conversation_id: AIConversationId,
@@ -356,9 +331,6 @@ impl QueuedQueryModel {
         let Some(row) = queue.iter_mut().find(|q| q.id == query_id) else {
             return;
         };
-        if !row.origin.is_user_managed() {
-            return;
-        }
         if row.text == new_text {
             return;
         }
@@ -371,7 +343,6 @@ impl QueuedQueryModel {
 
     /// Moves the row identified by `source_id` to position `target_index` within its queue.
     /// `target_index` is interpreted as the index in the post-removal list.
-    /// No-op when the row is not user-managed.
     pub fn reorder(
         &mut self,
         conversation_id: AIConversationId,
@@ -385,35 +356,25 @@ impl QueuedQueryModel {
         let Some(source_idx) = queue.iter().position(|q| q.id == source_id) else {
             return;
         };
-        if !queue[source_idx].origin.is_user_managed() {
-            return;
-        }
         let row = queue.remove(source_idx);
-        let first_user_managed_index = queue
-            .iter()
-            .take_while(|row| !row.origin.is_user_managed())
-            .count();
-        let clamped = target_index.max(first_user_managed_index).min(queue.len());
+        let clamped = target_index.min(queue.len());
         queue.insert(clamped, row);
         ctx.emit(QueuedQueryEvent::Reordered { conversation_id });
     }
 
     /// Enters edit mode for `query_id`. If another row was being edited, that edit is implicitly
-    /// committed (its current row text remains as-is). Cloud Mode rows are non-editable and this
-    /// call is a no-op for them.
+    /// committed (its current row text remains as-is).
     pub fn enter_edit_mode(
         &mut self,
         conversation_id: AIConversationId,
         query_id: QueuedQueryId,
         ctx: &mut ModelContext<Self>,
     ) {
-        let row_origin = self
+        let row_exists = self
             .queues
             .get(&conversation_id)
-            .and_then(|q| q.iter().find(|r| r.id == query_id))
-            .map(|r| r.origin);
-        let Some(origin) = row_origin else { return };
-        if !origin.is_user_managed() {
+            .is_some_and(|q| q.iter().any(|r| r.id == query_id));
+        if !row_exists {
             return;
         }
 

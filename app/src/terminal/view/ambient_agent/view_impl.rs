@@ -16,9 +16,7 @@ use warpui::prelude::{Empty, Vector2F};
 use warpui::{ModelHandle, ViewHandle};
 
 use crate::ai::ambient_agents::telemetry::{CloudAgentTelemetryEvent, CloudModeEntryPoint};
-use crate::ai::blocklist::{
-    agent_view::AgentViewEntryOrigin, BlocklistAIHistoryModel, QueuedQueryOrigin,
-};
+use crate::ai::blocklist::{agent_view::AgentViewEntryOrigin, BlocklistAIHistoryModel};
 use crate::ai::conversation_details_panel::ConversationDetailsData;
 use crate::pane_group::TerminalViewResources;
 use crate::terminal::cli_agent_sessions::CLIAgentSessionsModel;
@@ -106,10 +104,9 @@ impl TerminalView {
             return;
         };
 
-        // Tear down the cloud-mode queued-prompt row on terminal / transition events that
-        // replace it. Legacy `Failed`, `NeedsGithubAuth`, and `Cancelled` hand off to the
-        // existing error / auth / cancelled UI; `HarnessCommandStarted` hands off to the
-        // live harness CLI block. Idempotent and cheap when no row exists.
+        // Tear down the Cloud Mode pending prompt on terminal / transition events that replace it.
+        // Legacy `Failed`, `NeedsGithubAuth`, and `Cancelled` hand off to the existing error /
+        // auth / cancelled UI; `HarnessCommandStarted` hands off to the live harness CLI block.
         let should_remove_pending_user_query = match event {
             AmbientAgentViewModelEvent::Failed { .. } => {
                 !FeatureFlag::CloudModeSetupV2.is_enabled()
@@ -121,11 +118,7 @@ impl TerminalView {
             _ => false,
         };
         if should_remove_pending_user_query {
-            if FeatureFlag::NewQueuedPromptUI.is_enabled() {
-                self.remove_cloud_mode_queued_query(ctx);
-            } else {
-                self.remove_pending_user_query_block(ctx);
-            }
+            self.remove_pending_user_query_block(ctx);
         }
 
         match event {
@@ -154,9 +147,9 @@ impl TerminalView {
                     return;
                 }
                 if FeatureFlag::CloudModeSetupV2.is_enabled() {
-                    // Render the submitted cloud prompt via the queued-prompts panel while
-                    // the real shared-session transcript catches up. The row is removed
-                    // later by `HarnessCommandStarted` / failure / cancel / auth handlers.
+                    // Render the submitted cloud prompt while the real shared-session transcript
+                    // catches up. The pending block is removed later by
+                    // `HarnessCommandStarted` / failure / cancel / auth handlers.
                     //
                     // `request.prompt` is stored stripped of any `/plan` / `/orchestrate`
                     // prefix; rebuild the display form from `request.mode` so the user sees
@@ -167,19 +160,7 @@ impl TerminalView {
                         .map(|request| display_user_query_with_mode(request.mode, &request.prompt))
                         .unwrap_or_default();
                     if !prompt.is_empty() {
-                        if FeatureFlag::NewQueuedPromptUI.is_enabled() {
-                            if let Some(id) = self.enqueue_prompt(
-                                prompt,
-                                QueuedQueryOrigin::InitialCloudMode,
-                                ctx,
-                            ) {
-                                ambient_agent_view_model.update(ctx, |model, _| {
-                                    model.set_cloud_mode_queued_query_id(Some(id));
-                                });
-                            }
-                        } else if FeatureFlag::PendingUserQueryIndicator.is_enabled() {
-                            self.insert_cloud_mode_queued_user_query_block(prompt, ctx);
-                        }
+                        self.insert_cloud_mode_queued_user_query_block(prompt, ctx);
                     }
                 } else {
                     // Reset tip cooldown so the first tip shows for 60 seconds
@@ -212,17 +193,7 @@ impl TerminalView {
                     .pending_followup_prompt()
                     .map(str::to_owned);
                 if let Some(prompt) = pending_prompt {
-                    if FeatureFlag::NewQueuedPromptUI.is_enabled() {
-                        if let Some(id) =
-                            self.enqueue_prompt(prompt, QueuedQueryOrigin::InitialCloudMode, ctx)
-                        {
-                            ambient_agent_view_model.update(ctx, |model, _| {
-                                model.set_cloud_mode_queued_query_id(Some(id));
-                            });
-                        }
-                    } else if FeatureFlag::PendingUserQueryIndicator.is_enabled() {
-                        self.insert_cloud_mode_queued_user_query_block(prompt, ctx);
-                    }
+                    self.insert_cloud_mode_queued_user_query_block(prompt, ctx);
                 }
                 ctx.notify();
             }

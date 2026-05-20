@@ -23,7 +23,7 @@ use warpui::{
 };
 
 use crate::ai::blocklist::context_model::BlocklistAIContextModel;
-use crate::ai::blocklist::{QueuedQueryEvent, QueuedQueryId, QueuedQueryModel, QueuedQueryOrigin};
+use crate::ai::blocklist::{QueuedQueryEvent, QueuedQueryId, QueuedQueryModel};
 use crate::appearance::Appearance;
 use crate::editor::{EditorView, Event as EditorEvent, SingleLineEditorOptions, TextOptions};
 use crate::send_telemetry_from_ctx;
@@ -452,9 +452,7 @@ impl QueuedPromptsPanelView {
 
     /// Visibility predicate used by the host to decide whether to render the panel.
     pub fn should_render(&self, ctx: &AppContext) -> bool {
-        if !FeatureFlag::QueueSlashCommand.is_enabled()
-            || !FeatureFlag::NewQueuedPromptUI.is_enabled()
-        {
+        if !FeatureFlag::QueueSlashCommand.is_enabled() {
             return false;
         }
         let Some(conversation_id) = self
@@ -543,7 +541,6 @@ impl View for QueuedPromptsPanelView {
                     panel_view_id,
                     index,
                     text: query.text().to_owned(),
-                    origin: query.origin(),
                     is_in_edit_mode,
                     is_being_dragged,
                     edit_editor: &self.edit_editor,
@@ -678,7 +675,6 @@ struct RenderRowProps<'a> {
     panel_view_id: EntityId,
     index: usize,
     text: String,
-    origin: QueuedQueryOrigin,
     is_in_edit_mode: bool,
     is_being_dragged: bool,
     edit_editor: &'a ViewHandle<EditorView>,
@@ -692,7 +688,6 @@ fn render_row(props: RenderRowProps<'_>) -> Box<dyn Element> {
         panel_view_id,
         index,
         text,
-        origin,
         is_in_edit_mode,
         is_being_dragged,
         edit_editor,
@@ -701,7 +696,6 @@ fn render_row(props: RenderRowProps<'_>) -> Box<dyn Element> {
     } = props;
 
     let theme = appearance.theme();
-    let user_managed = origin.is_user_managed();
     let dimmed_color: ColorU = theme.sub_text_color(theme.surface_1()).into();
     let foreground_color: ColorU = theme.foreground().into();
     let row_hover_background: Fill = theme.surface_overlay_1().into();
@@ -730,21 +724,14 @@ fn render_row(props: RenderRowProps<'_>) -> Box<dyn Element> {
                 .finish()
         };
 
-        let drag_handle: Box<dyn Element> = if user_managed {
-            ConstrainedBox::new(
-                Icon::DragIndicator
-                    .to_warpui_icon(dimmed_color.into())
-                    .finish(),
-            )
-            .with_height(24.)
-            .with_width(24.)
-            .finish()
-        } else {
-            ConstrainedBox::new(Empty::new().finish())
-                .with_height(24.)
-                .with_width(24.)
-                .finish()
-        };
+        let drag_handle: Box<dyn Element> = ConstrainedBox::new(
+            Icon::DragIndicator
+                .to_warpui_icon(dimmed_color.into())
+                .finish(),
+        )
+        .with_height(24.)
+        .with_width(24.)
+        .finish();
 
         let mut row = Flex::row()
             .with_cross_axis_alignment(CrossAxisAlignment::Center)
@@ -752,7 +739,7 @@ fn render_row(props: RenderRowProps<'_>) -> Box<dyn Element> {
             .with_child(drag_handle)
             .with_child(Expanded::new(1., prompt_text_or_editor).finish());
 
-        if state.is_hovered() && user_managed && !is_being_dragged {
+        if state.is_hovered() && !is_being_dragged {
             let mut buttons = Flex::row()
                 .with_cross_axis_alignment(CrossAxisAlignment::Center)
                 .with_spacing(4.);
@@ -788,7 +775,7 @@ fn render_row(props: RenderRowProps<'_>) -> Box<dyn Element> {
             .with_horizontal_padding(8.)
             .with_vertical_padding(4.)
             .with_corner_radius(CornerRadius::with_all(Radius::Pixels(4.)));
-        if is_being_dragged || (state.is_hovered() && user_managed) {
+        if is_being_dragged || state.is_hovered() {
             container = container.with_background(row_hover_background);
         }
         container.finish()
@@ -797,9 +784,7 @@ fn render_row(props: RenderRowProps<'_>) -> Box<dyn Element> {
 
     let position_id = queue_row_position_id(panel_view_id, index);
 
-    // Non-draggable rows still register a `SavePosition` so live-reorder can measure their bounds
-    // when neighbors are dragged across them.
-    if !user_managed || is_in_edit_mode {
+    if is_in_edit_mode {
         return SavePosition::new(row_inner, &position_id).finish();
     }
 

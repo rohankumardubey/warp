@@ -2460,6 +2460,7 @@ type ConversationFinishedCallback =
     Box<dyn FnOnce(&mut TerminalView, FinishReason, &mut ViewContext<TerminalView>)>;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(in crate::terminal::view) enum PendingUserQueryKind {
+    QueuedPrompt,
     CloudMode,
 }
 
@@ -2676,6 +2677,8 @@ pub struct TerminalView {
     rich_content_views: Vec<RichContent>,
     pending_user_query_view_id: Option<EntityId>,
     pending_user_query_kind: Option<PendingUserQueryKind>,
+    pending_user_query_conversation_id: Option<AIConversationId>,
+    queued_prompt_callback: Option<ConversationFinishedCallback>,
 
     /// Cached view ids for usage footers keyed by the AI block view id that owns them.
     usage_footer_view_ids: HashMap<EntityId, EntityId>,
@@ -3382,6 +3385,18 @@ impl TerminalView {
                             },
                             ctx,
                         );
+                    }
+                    let active_conversation_id = me
+                        .agent_view_controller
+                        .as_ref(ctx)
+                        .agent_view_state()
+                        .active_conversation_id();
+                    let pending_user_query_conversation_id =
+                        me.pending_user_query_conversation_id();
+                    let should_keep_pending_user_query = active_conversation_id.is_some()
+                        && active_conversation_id == pending_user_query_conversation_id;
+                    if !should_keep_pending_user_query {
+                        me.remove_pending_user_query_block(ctx);
                     }
 
                     me.maybe_run_pending_cloud_mode_start_callback(ctx);
@@ -4246,6 +4261,8 @@ impl TerminalView {
             rich_content_views: Vec::new(),
             pending_user_query_view_id: None,
             pending_user_query_kind: None,
+            pending_user_query_conversation_id: None,
+            queued_prompt_callback: None,
             usage_footer_view_ids: Default::default(),
             block_onboarding_active: false,
             onboarding_agentic_suggestions_block: None,
@@ -4332,7 +4349,7 @@ impl TerminalView {
         };
         terminal_view.register_subscriptions_for_use_agent_footer(ctx);
 
-        if FeatureFlag::NewQueuedPromptUI.is_enabled() {
+        if FeatureFlag::QueueSlashCommand.is_enabled() {
             let queued_query_model = terminal_view.queued_query_model.clone();
             let queued_prompts_panel = ctx.add_typed_action_view(|ctx| {
                 crate::ai::blocklist::QueuedPromptsPanelView::new(
@@ -4974,6 +4991,13 @@ impl TerminalView {
                 // Focus the block so that the user can interact
                 // with any blocking actions (if any).
                 self.focus_ai_block_if_self_focused(active_ai_block, ctx);
+                let active_block_conversation_id = active_ai_block.as_ref(ctx).conversation_id();
+                let pending_query_conversation_id = self.pending_user_query_conversation_id();
+                let is_same_conversation = pending_query_conversation_id
+                    .is_some_and(|id| id == active_block_conversation_id);
+                if self.pending_user_query_view_id.is_some() && !is_same_conversation {
+                    self.remove_pending_user_query_block(ctx);
+                }
             } else if !has_active_subagent() {
                 if let Some(last_ai_block) = self.last_ai_block() {
                     finish_reason = last_ai_block.as_ref(ctx).finish_reason();
@@ -4981,6 +5005,7 @@ impl TerminalView {
             }
 
             if let Some(reason) = finish_reason {
+                let queued_prompt = self.queued_prompt_callback.take();
                 self.drain_queued_prompts(*conversation_id, reason, ctx);
 
                 let callbacks = self
@@ -4988,6 +5013,9 @@ impl TerminalView {
                     .drain(..)
                     .collect_vec();
                 for callback in callbacks {
+                    callback(self, reason, ctx);
+                }
+                if let Some(callback) = queued_prompt {
                     callback(self, reason, ctx);
                 }
             }
@@ -5046,9 +5074,8 @@ impl TerminalView {
         }
     }
 
-    /// Append a prompt to the per-conversation queued-query model. Used by trigger surfaces
-    /// (auto-queue toggle, `/queue`, `/compact-and`, `/fork-and-compact`, Cloud Mode initial
-    /// prompt) to enqueue a follow-up prompt that fires after the current exchange completes.
+    /// Append a prompt to the per-conversation queued-query model for regular Agent Mode queueing
+    /// surfaces such as the queue-next toggle and `/queue`.
     pub fn enqueue_prompt(
         &mut self,
         prompt: String,
@@ -5099,41 +5126,6 @@ impl TerminalView {
         }
     }
 
-    /// Removes the cloud-mode queued-query row owned by the active ambient-agent view model, if
-    /// one is currently appended. Idempotent: a no-op when no row id is recorded.
-    pub fn remove_cloud_mode_queued_query(&mut self, ctx: &mut ViewContext<Self>) {
-        let Some(conversation_id) = self
-            .ai_context_model
-            .as_ref(ctx)
-            .selected_conversation_id(ctx)
-        else {
-            return;
-        };
-        self.remove_cloud_mode_queued_query_for_conversation(conversation_id, ctx);
-    }
-
-    fn remove_cloud_mode_queued_query_for_conversation(
-        &mut self,
-        conversation_id: AIConversationId,
-        ctx: &mut ViewContext<Self>,
-    ) {
-        let Some(ambient_agent_view_model) = self.ambient_agent_view_model.clone() else {
-            return;
-        };
-        let Some(query_id) = ambient_agent_view_model
-            .as_ref(ctx)
-            .cloud_mode_queued_query_id()
-        else {
-            return;
-        };
-        self.queued_query_model.update(ctx, |model, ctx| {
-            model.remove_by_id(conversation_id, query_id, ctx);
-        });
-        ambient_agent_view_model.update(ctx, |model, _| {
-            model.set_cloud_mode_queued_query_id(None);
-        });
-    }
-
     /// Drains one prompt from the per-conversation queued-query model when the active conversation
     /// finishes.
     fn drain_queued_prompts(
@@ -5144,6 +5136,15 @@ impl TerminalView {
     ) {
         match finish_reason {
             FinishReason::Complete => {
+                let input_is_empty = self.input.as_ref(ctx).buffer_text(ctx).is_empty();
+                let first_row_is_in_edit_mode = self
+                    .queued_query_model
+                    .as_ref(ctx)
+                    .first_row_is_in_edit_mode(conversation_id);
+                if first_row_is_in_edit_mode && !input_is_empty {
+                    return;
+                }
+                
                 let action = self.queued_query_model.update(ctx, |model, ctx| {
                     model.pop_for_autofire(conversation_id, None, ctx)
                 });
@@ -5171,9 +5172,9 @@ impl TerminalView {
                 if !input_is_empty {
                     return;
                 }
-                let popped = self.queued_query_model.update(ctx, |model, ctx| {
-                    model.pop_front_user_managed(conversation_id, ctx)
-                });
+                let popped = self
+                    .queued_query_model
+                    .update(ctx, |model, ctx| model.pop_front(conversation_id, ctx));
                 if let Some(query) = popped {
                     self.input.update(ctx, |input, ctx| {
                         input.replace_buffer_content(query.text(), ctx);
@@ -5607,11 +5608,7 @@ impl TerminalView {
                         .set_is_executing_oz_environment_startup_commands(false);
                 }
 
-                if FeatureFlag::NewQueuedPromptUI.is_enabled() {
-                    self.remove_cloud_mode_queued_query_for_conversation(*conversation_id, ctx);
-                } else {
-                    self.remove_pending_user_query_block(ctx);
-                }
+                self.remove_pending_user_query_block(ctx);
 
                 let should_add_ai_block = history_model
                     .as_ref(ctx)

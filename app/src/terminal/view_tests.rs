@@ -92,30 +92,6 @@ fn add_window_with_cloud_mode_terminal(app: &mut App) -> ViewHandle<TerminalView
     terminal
 }
 
-fn has_cloud_mode_queued_prompt(view: &TerminalView, ctx: &AppContext) -> bool {
-    let Some(ambient_agent_view_model) = view.ambient_agent_view_model() else {
-        return false;
-    };
-    let Some(query_id) = ambient_agent_view_model
-        .as_ref(ctx)
-        .cloud_mode_queued_query_id()
-    else {
-        return false;
-    };
-    let Some(conversation_id) = view
-        .ai_context_model()
-        .as_ref(ctx)
-        .selected_conversation_id(ctx)
-    else {
-        return false;
-    };
-    view.queued_query_model
-        .as_ref(ctx)
-        .queue_for(conversation_id)
-        .iter()
-        .any(|q| q.id() == query_id)
-}
-
 fn has_pending_cloud_mode_user_query_block(view: &TerminalView) -> bool {
     view.pending_user_query_view_id.is_some()
         && view.pending_user_query_kind == Some(PendingUserQueryKind::CloudMode)
@@ -1218,7 +1194,6 @@ fn cloud_mode_followup_input_uses_explicit_submit_event_even_when_view_pending()
         let _cloud_mode = FeatureFlag::CloudMode.override_enabled(true);
         let _handoff = FeatureFlag::HandoffCloudCloud.override_enabled(true);
         let _setup_v2 = FeatureFlag::CloudModeSetupV2.override_enabled(true);
-        let _new_queued_prompt_ui = FeatureFlag::NewQueuedPromptUI.override_enabled(true);
 
         let terminal = add_window_with_cloud_mode_terminal(&mut app);
         let task_id = AmbientAgentTaskId::from_str("123e4567-e89b-12d3-a456-426614174000")
@@ -1281,60 +1256,13 @@ fn pending_cloud_followup_without_ambient_model_restores_prompt() {
 }
 
 #[test]
-fn cloud_mode_dispatched_agent_inserts_queued_user_query() {
+fn cloud_mode_dispatched_agent_inserts_pending_user_query() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
         let _agent_view = FeatureFlag::AgentView.override_enabled(true);
         let _cloud_mode = FeatureFlag::CloudMode.override_enabled(true);
         let _handoff = FeatureFlag::HandoffCloudCloud.override_enabled(true);
         let _setup_v2 = FeatureFlag::CloudModeSetupV2.override_enabled(true);
-        let _new_queued_prompt_ui = FeatureFlag::NewQueuedPromptUI.override_enabled(true);
-
-        let terminal = add_window_with_cloud_mode_terminal(&mut app);
-
-        terminal.update(&mut app, |view, ctx| {
-            view.ambient_agent_view_model()
-                .expect("cloud mode terminal should have ambient model")
-                .update(ctx, |model, ctx| {
-                    model.spawn_agent_with_request(
-                        SpawnAgentRequest {
-                            prompt: "write the tests".to_string(),
-                            mode: UserQueryMode::Normal,
-                            config: None,
-                            title: None,
-                            team: None,
-                            agent_identity_uid: None,
-                            skill: None,
-                            attachments: vec![],
-                            interactive: None,
-                            parent_run_id: None,
-                            runtime_skills: vec![],
-                            referenced_attachments: vec![],
-                            conversation_id: None,
-                            initial_snapshot_token: None,
-                            snapshot_disabled: None,
-                        },
-                        ctx,
-                    );
-                });
-            view.handle_ambient_agent_event(&AmbientAgentViewModelEvent::DispatchedAgent, ctx);
-
-            assert!(has_cloud_mode_queued_prompt(view, ctx));
-        });
-    });
-}
-
-#[test]
-fn cloud_mode_dispatched_agent_inserts_pending_user_query_when_new_ui_is_disabled() {
-    App::test((), |mut app| async move {
-        initialize_app_for_terminal_view(&mut app);
-        let _agent_view = FeatureFlag::AgentView.override_enabled(true);
-        let _cloud_mode = FeatureFlag::CloudMode.override_enabled(true);
-        let _handoff = FeatureFlag::HandoffCloudCloud.override_enabled(true);
-        let _setup_v2 = FeatureFlag::CloudModeSetupV2.override_enabled(true);
-        let _new_queued_prompt_ui = FeatureFlag::NewQueuedPromptUI.override_enabled(false);
-        let _pending_user_query_indicator =
-            FeatureFlag::PendingUserQueryIndicator.override_enabled(true);
 
         let terminal = add_window_with_cloud_mode_terminal(&mut app);
 
@@ -1366,7 +1294,48 @@ fn cloud_mode_dispatched_agent_inserts_pending_user_query_when_new_ui_is_disable
             view.handle_ambient_agent_event(&AmbientAgentViewModelEvent::DispatchedAgent, ctx);
 
             assert!(has_pending_cloud_mode_user_query_block(view));
-            assert!(!has_cloud_mode_queued_prompt(view, ctx));
+        });
+    });
+}
+
+#[test]
+fn cloud_mode_dispatched_agent_removes_pending_user_query_when_harness_starts() {
+    App::test((), |mut app| async move {
+        initialize_app_for_terminal_view(&mut app);
+        let _agent_view = FeatureFlag::AgentView.override_enabled(true);
+        let _cloud_mode = FeatureFlag::CloudMode.override_enabled(true);
+        let _handoff = FeatureFlag::HandoffCloudCloud.override_enabled(true);
+        let _setup_v2 = FeatureFlag::CloudModeSetupV2.override_enabled(true);
+
+        let terminal = add_window_with_cloud_mode_terminal(&mut app);
+
+        terminal.update(&mut app, |view, ctx| {
+            view.ambient_agent_view_model()
+                .expect("cloud mode terminal should have ambient model")
+                .update(ctx, |model, ctx| {
+                    model.spawn_agent_with_request(
+                        SpawnAgentRequest {
+                            prompt: "write the tests".to_string(),
+                            mode: UserQueryMode::Normal,
+                            config: None,
+                            title: None,
+                            team: None,
+                            agent_identity_uid: None,
+                            skill: None,
+                            attachments: vec![],
+                            interactive: None,
+                            parent_run_id: None,
+                            runtime_skills: vec![],
+                            referenced_attachments: vec![],
+                            conversation_id: None,
+                            initial_snapshot_token: None,
+                            snapshot_disabled: None,
+                        },
+                        ctx,
+                    );
+                });
+            view.handle_ambient_agent_event(&AmbientAgentViewModelEvent::DispatchedAgent, ctx);
+            assert!(has_pending_cloud_mode_user_query_block(view));
 
             view.handle_ambient_agent_event(
                 &AmbientAgentViewModelEvent::HarnessCommandStarted {
@@ -1381,14 +1350,13 @@ fn cloud_mode_dispatched_agent_inserts_pending_user_query_when_new_ui_is_disable
 }
 
 #[test]
-fn cloud_mode_failed_keeps_queued_prompt_and_hides_input() {
+fn cloud_mode_failed_keeps_pending_prompt_and_hides_input() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
         let _agent_view = FeatureFlag::AgentView.override_enabled(true);
         let _cloud_mode = FeatureFlag::CloudMode.override_enabled(true);
         let _handoff = FeatureFlag::HandoffCloudCloud.override_enabled(true);
         let _setup_v2 = FeatureFlag::CloudModeSetupV2.override_enabled(true);
-        let _new_queued_prompt_ui = FeatureFlag::NewQueuedPromptUI.override_enabled(true);
 
         let terminal = add_window_with_cloud_mode_terminal(&mut app);
 
@@ -1397,19 +1365,8 @@ fn cloud_mode_failed_keeps_queued_prompt_and_hides_input() {
                 .lock()
                 .set_shared_session_status(SharedSessionStatus::ViewPending);
             view.enter_ambient_agent_setup(None, ctx);
-            let query_id = view
-                .enqueue_prompt(
-                    "queued prompt".to_string(),
-                    crate::ai::blocklist::QueuedQueryOrigin::InitialCloudMode,
-                    ctx,
-                )
-                .expect("enqueue_prompt should succeed once a conversation exists");
-            view.ambient_agent_view_model()
-                .expect("cloud mode terminal should have ambient model")
-                .update(ctx, |model, _| {
-                    model.set_cloud_mode_queued_query_id(Some(query_id));
-                });
-            assert!(has_cloud_mode_queued_prompt(view, ctx));
+            view.insert_cloud_mode_queued_user_query_block("queued prompt".to_string(), ctx);
+            assert!(has_pending_cloud_mode_user_query_block(view));
 
             view.handle_ambient_agent_event(
                 &AmbientAgentViewModelEvent::Failed {
@@ -1418,14 +1375,11 @@ fn cloud_mode_failed_keeps_queued_prompt_and_hides_input() {
                 ctx,
             );
 
-            // CloudModeSetupV2 keeps the queued cloud-mode prompt across `Failed` so the
+            // CloudModeSetupV2 keeps the pending cloud-mode prompt across `Failed` so the
             // user can see what they had asked for above the tombstone.
-            assert!(has_cloud_mode_queued_prompt(view, ctx));
+            assert!(has_pending_cloud_mode_user_query_block(view));
             assert!(view.conversation_ended_tombstone_view_id.is_some());
-            // The tombstone is the only rich content in the block list; the queued prompt
-            // now lives in `QueuedPromptsPanelView` (rendered above the input editor), not
-            // as a rich-content block.
-            assert_eq!(view.rich_content_views.len(), 1);
+            assert_eq!(view.rich_content_views.len(), 2);
             {
                 let model = view.model.lock();
                 assert!(!view.is_input_box_visible(&model, ctx));
@@ -1437,7 +1391,7 @@ fn cloud_mode_failed_keeps_queued_prompt_and_hides_input() {
                 },
                 ctx,
             );
-            assert_eq!(view.rich_content_views.len(), 1);
+            assert_eq!(view.rich_content_views.len(), 2);
         });
 
         let window_id = app.read(|ctx| terminal.window_id(ctx));
@@ -1464,14 +1418,13 @@ fn cloud_mode_failed_keeps_queued_prompt_and_hides_input() {
 }
 
 #[test]
-fn cloud_mode_followup_dispatched_inserts_queued_user_query() {
+fn cloud_mode_followup_dispatched_inserts_pending_user_query() {
     App::test((), |mut app| async move {
         initialize_app_for_terminal_view(&mut app);
         let _agent_view = FeatureFlag::AgentView.override_enabled(true);
         let _cloud_mode = FeatureFlag::CloudMode.override_enabled(true);
         let _handoff = FeatureFlag::HandoffCloudCloud.override_enabled(true);
         let _setup_v2 = FeatureFlag::CloudModeSetupV2.override_enabled(true);
-        let _new_queued_prompt_ui = FeatureFlag::NewQueuedPromptUI.override_enabled(true);
 
         let terminal = add_window_with_cloud_mode_terminal(&mut app);
         let task_id = AmbientAgentTaskId::from_str("123e4567-e89b-12d3-a456-426614174000")
@@ -1486,7 +1439,7 @@ fn cloud_mode_followup_dispatched_inserts_queued_user_query() {
                 });
             view.handle_ambient_agent_event(&AmbientAgentViewModelEvent::FollowupDispatched, ctx);
 
-            assert!(has_cloud_mode_queued_prompt(view, ctx));
+            assert!(has_pending_cloud_mode_user_query_block(view));
         });
     });
 }
@@ -1499,7 +1452,6 @@ fn cloud_mode_setup_v2_suppresses_sharer_input_updates_while_followup_setup_comm
         let _cloud_mode = FeatureFlag::CloudMode.override_enabled(true);
         let _handoff = FeatureFlag::HandoffCloudCloud.override_enabled(true);
         let _setup_v2 = FeatureFlag::CloudModeSetupV2.override_enabled(true);
-        let _new_queued_prompt_ui = FeatureFlag::NewQueuedPromptUI.override_enabled(true);
         let setup_command_ops = input_operations_for_buffer_content(&mut app, "setup command text");
         let normal_input_ops = input_operations_for_buffer_content(&mut app, "normal sync text");
 
