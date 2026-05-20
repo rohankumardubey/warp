@@ -516,7 +516,10 @@ type TabIndentation = Box<dyn Fn(&BufferBlockStyle, bool) -> IndentBehavior>;
 #[derive(Clone)]
 pub struct BufferSnapshot {
     content: SumTree<BufferText>,
-    byte_len: ByteOffset,
+    /// Total byte length of the buffer content. Exposed as `pub` so that
+    /// consumers (e.g. `SyntaxTreeState`) can cheaply check size limits
+    /// without accessing the inner `SumTree`.
+    pub byte_len: ByteOffset,
 }
 
 impl BufferSnapshot {

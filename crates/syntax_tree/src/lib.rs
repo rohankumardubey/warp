@@ -33,6 +33,15 @@ use warpui::text::point::Point;
 
 const MAX_SYNTAX_TREES: usize = 3;
 
+/// Maximum buffer byte length for which syntax tree parsing will be attempted.
+/// Buffers larger than this skip tree-sitter parsing entirely to avoid the
+/// ~1.5 GiB+ memory overhead that tree-sitter allocates when parsing
+/// multi-million-line or multi-GiB files (see APP-4519).
+///
+/// 5 MiB is generous enough for virtually all source files (~100k lines)
+/// while preventing runaway memory usage from accidentally opened data files.
+const MAX_SYNTAX_PARSE_BYTES: usize = 5 * 1024 * 1024;
+
 thread_local! {
     static PARSER: RefCell<Parser> = RefCell::new(Parser::new());
 }
@@ -316,6 +325,18 @@ impl DecorationLayer for SyntaxTreeState {
         content: BufferSnapshot,
         ctx: &mut ModelContext<Self>,
     ) {
+        // Skip parsing for oversized buffers to prevent multi-GiB tree-sitter
+        // allocations (APP-4519). The buffer will still work but without
+        // syntax highlighting.
+        if content.byte_len.as_usize() > MAX_SYNTAX_PARSE_BYTES {
+            log::info!(
+                "Skipping syntax tree parsing for oversized buffer ({} bytes)",
+                content.byte_len.as_usize()
+            );
+            self.buffer_version = version;
+            return;
+        }
+
         // If there is an active parsing in progress. Abort that first before starting another one.
         if let Some(handle) = self.parsing_handle.take() {
             handle.abort();

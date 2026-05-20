@@ -39,6 +39,16 @@ use watcher::{BulkFilesystemWatcher, BulkFilesystemWatcherEvent};
 pub mod text_file_reader;
 pub use text_file_reader::{TextFileReadResult, TextFileSegment};
 
+/// Maximum file size (in bytes) that will be loaded into an editor buffer.
+/// Files larger than this threshold are rejected with `FileLoadError::FileTooLarge`
+/// to prevent multi-GiB memory spikes from loading oversized files into the
+/// SumTree-backed buffer and tree-sitter parser.
+///
+/// 20 MiB is a generous limit that covers virtually all source files while
+/// protecting against accidentally opening database dumps, binaries, or
+/// log files that would otherwise consume all available memory (see APP-4519).
+const MAX_EDITOR_FILE_SIZE: u64 = 20 * 1024 * 1024;
+
 #[derive(Debug)]
 pub enum FileModelEvent {
     FileLoaded {
@@ -419,6 +429,22 @@ impl FileModel {
         let use_individual_watcher = watcher_type == WatcherType::Individual;
         let future = ctx.spawn(
             async move {
+                // Guard: check file size before reading to prevent multi-GiB allocations
+                // from oversized files (APP-4519).
+                match async_fs::metadata(&file_path_buf).await {
+                    Ok(meta) if meta.len() > MAX_EDITOR_FILE_SIZE => {
+                        return (
+                            file_id,
+                            Err(FileLoadError::FileTooLarge {
+                                path: file_path_buf,
+                                size_bytes: meta.len(),
+                            }),
+                        );
+                    }
+                    // If metadata fails, fall through to the read which will
+                    // produce a more specific IO error.
+                    _ => {}
+                }
                 let contents = async_fs::read_to_string(&file_path_buf)
                     .await
                     .map_err(FileLoadError::from);
@@ -1109,6 +1135,18 @@ impl FileModel {
             async move {
                 let mut res = Vec::new();
                 for file_path in matching_files {
+                    // Guard: skip auto-reload for oversized files to prevent
+                    // multi-GiB memory spikes (APP-4519).
+                    if let Ok(meta) = async_fs::metadata(&file_path).await {
+                        if meta.len() > MAX_EDITOR_FILE_SIZE {
+                            log::warn!(
+                                "Skipping auto-reload for oversized file ({} bytes): {}",
+                                meta.len(),
+                                file_path.display()
+                            );
+                            continue;
+                        }
+                    }
                     if let Ok(content) = async_fs::read_to_string(&file_path).await {
                         res.push((file_path, content));
                     }

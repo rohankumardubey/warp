@@ -477,6 +477,15 @@ impl GlobalBufferModel {
         }
     }
 
+    /// Maximum content size (in bytes) that `populate_buffer_with_read_content` will
+    /// accept. This is a secondary defense against oversized buffers: the primary
+    /// guard lives in `FileModel` (which checks file size before reading), but
+    /// content can also arrive via `read_content_for_file` (discard path) or
+    /// remote/server-local buffers that bypass `FileModel`'s guard.
+    ///
+    /// Matches `MAX_EDITOR_FILE_SIZE` in `warp_files` (20 MiB). See APP-4519.
+    const MAX_BUFFER_CONTENT_SIZE: usize = 20 * 1024 * 1024;
+
     /// Once we finish reading the file's content from the disk, populate the buffer with the content.
     /// For initial load (is_loaded_from_file_system == true), this is synchronous.
     /// For auto-reload (is_loaded_from_file_system == false), this spawns a background task for diff computation.
@@ -491,6 +500,27 @@ impl GlobalBufferModel {
         is_initial_load: bool,
         ctx: &mut ModelContext<Self>,
     ) {
+        // Secondary guard: reject oversized content to prevent multi-GiB memory
+        // allocations in the SumTree-backed buffer (APP-4519).
+        if content.len() > Self::MAX_BUFFER_CONTENT_SIZE {
+            log::warn!(
+                "Rejecting oversized buffer content ({} bytes) for file_id={:?}",
+                content.len(),
+                file_id
+            );
+            ctx.emit(GlobalBufferModelEvent::FailedToLoad {
+                file_id,
+                error: std::rc::Rc::new(warp_util::file::FileLoadError::FileTooLarge {
+                    path: self
+                        .file_path(file_id)
+                        .map(Path::to_path_buf)
+                        .unwrap_or_default(),
+                    size_bytes: content.len() as u64,
+                }),
+            });
+            return;
+        }
+
         let Some(state) = self.buffers.get_mut(&file_id) else {
             return;
         };
