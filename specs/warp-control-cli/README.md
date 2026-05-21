@@ -13,22 +13,20 @@ The local-control protocol and catalog are broader than this slice, but commands
 - the app-side bridge owns the per-process loopback listener and dispatches supported actions onto the live Warp UI context.
 The binary should initialize only CLI parsing, instance discovery, local authentication loading, request serialization, HTTP transport, and output formatting. It should not initialize GUI state, terminal models, rendering, workspaces, or main-app startup paths.
 During the provisional naming period, release artifacts and helper names may be channelized, but operator docs and examples should use `warpctrl` unless an integration branch explicitly documents a channel-specific alias.
-This branch wires the standalone binary target and the macOS/Linux bundle-script artifact selectors:
-- `cargo build -p warp --bin warpctrl`
-- `script/macos/bundle --artifact warpctrl ...`
-- `script/linux/bundle --artifact warpctrl ...`
-Windows has the native Rust binary target, but installer/release helper exposure remains follow-up packaging work.
 ## Install and invocation guidance
 ### macOS
-Build locally with `cargo build -p warp --bin warpctrl`, then run `target/debug/warpctrl` or copy/symlink that binary onto `PATH`.
-For distributable standalone artifact checks, use `script/macos/bundle --artifact warpctrl` with the desired channel/signing flags. The bundle script writes a standalone `warpctrl` binary into its macOS artifact output directory instead of embedding it in the GUI app bundle.
+Use the `warpctrl` binary or helper installed by the matching Warp build. For packaged builds, this is expected to live with the app's bundled CLI helpers, such as:
+- `/Applications/Warp.app/Contents/Resources/bin/warpctrl` for stable-style installs;
+- the equivalent `WarpDev.app`, `WarpPreview.app`, `WarpLocal.app`, or `WarpOss.app` bundle path for non-stable channels.
+Add that helper directory to `PATH`, or create a symlink from a directory already on `PATH`.
 ### Linux
-Build locally with `cargo build -p warp --bin warpctrl`, then run `target/debug/warpctrl` or copy/symlink that binary onto `PATH`.
-For distributable standalone artifact checks, use `script/linux/bundle --artifact warpctrl` with the desired channel/package selection. The Linux bundle script routes packaging through the standalone control-binary artifact path; downstream package installation should place the emitted `warpctrl` binary according to that package format.
+Use the `warpctrl` binary installed by the matching package or unpacked CLI artifact. Package installs should place it on `PATH`; tarball-style artifacts can be unpacked anywhere and invoked by absolute path or symlinked into a directory on `PATH`.
 Run `warpctrl --version` after installation to confirm the shell is resolving the expected build.
 ### Windows
-Build locally with `cargo build -p warp --bin warpctrl`, then run `target\debug\warpctrl.exe` or copy that binary onto `PATH`.
-The Windows-native binary target exists in this slice. Installer helper creation and release-artifact wiring still need a later packaging change before docs can promise an installer-provided `warpctrl` command.
+Use the installer-provided helper from the Warp install directory, expected under:
+- `<Warp install dir>\bin\warpctrl.cmd`, or
+- `<Warp install dir>\bin\warpctrl.exe` if the implementation branch ships a native standalone executable.
+Add the install directory's `bin` folder to `PATH` if the installer did not do so. In PowerShell, prefer quoting the full path if the install directory contains spaces.
 ## End-to-end local test flow
 Use matching app and CLI bits from the same branch or release artifact so the protocol version and action catalog agree.
 1. Start Warp and leave at least one window open.
@@ -54,37 +52,6 @@ Expected failures:
 - multiple ambiguous instances: exits non-zero and asks for `--instance`;
 - unsupported app build or stale discovery record: exits non-zero with a protocol, stale-target, or transport error;
 - `tab.create` not yet implemented by the running app bridge: exits non-zero with an unsupported-action error.
-## Security model
-The local-control protocol is designed for same-user scripting, not cross-user or network access. The trust boundary is the local user account.
-- **Loopback-only listener.** Each Warp process binds its control server to `127.0.0.1` on an ephemeral port. The listener is not reachable from the network.
-- **Per-instance bearer token.** A random token is generated at startup and written into the discovery record. Every control request must present this token in the `Authorization` header; missing or invalid tokens are rejected with HTTP 401.
-- **File-permission-gated discovery.** Discovery records are stored in `~/.warp/local-control/` with `0600` permissions (owner read/write only). Any process that can read the file can authenticate, so the security boundary is the same as `~/.ssh/` or macOS Keychain — same-user process isolation.
-- **Stale-record pruning.** On each `instance list` or implicit discovery call, records whose PID is no longer alive are deleted automatically, preventing stale tokens from lingering on disk.
-- **No CORS.** The control endpoints do not set permissive CORS headers, so browser-origin JavaScript cannot read responses even if it guesses the port. The bearer token requirement provides a second layer since browsers cannot read the discovery file.
-```mermaid
-sequenceDiagram
-    participant CLI as warpctrl
-    participant FS as ~/.warp/local-control/
-    participant HTTP as Warp loopback server<br/>(127.0.0.1:ephemeral)
-    participant Bridge as App bridge
-
-    CLI->>FS: Read discovery records (0600)
-    FS-->>CLI: instance_id, endpoint, auth_token
-    CLI->>CLI: Prune stale PIDs, select instance
-    CLI->>HTTP: POST /v1/control<br/>Authorization: Bearer <token>
-    HTTP->>HTTP: Verify token matches instance
-    alt Invalid or missing token
-        HTTP-->>CLI: 401 Unauthorized
-    else Valid token
-        HTTP->>Bridge: Dispatch action to app context
-        Bridge-->>HTTP: Structured result or error
-        HTTP-->>CLI: JSON response envelope
-    end
-```
-**Known limitations and future hardening:**
-- The token is stored in plaintext in the discovery JSON file. Any compromised process running as the same user can extract it.
-- Tokens do not rotate or expire during a Warp session. A leaked token is valid until the process exits.
-- Once higher-risk handlers land (e.g. `input.insert`, command execution), the same-user boundary becomes a code-execution trust boundary. Consider separating the token from the discovery metadata, adding per-request nonces, or switching to a Unix domain socket with `SO_PEERCRED` for kernel-verified caller identity.
 ## Documentation review notes
 - Treat `warpctrl` as provisional executable naming until packaging signs off on final artifact aliases.
 - Keep examples scoped to discovery and `tab create` until additional app-side handlers are implemented.

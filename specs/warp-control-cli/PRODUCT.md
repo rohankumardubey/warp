@@ -1,10 +1,10 @@
 # Summary
-Warp should ship an allowlisted standalone local control CLI binary that lets developers script the same classes of user-visible actions they can already perform inside the running app: manipulating windows, tabs, panes, sessions, appearance, settings, and selected UI surfaces. The CLI should operate against one or more already-running local Warp app processes through a stable machine protocol, with deterministic target selection and clear errors when a process or target is ambiguous.
+Warp should ship an allowlisted standalone local control CLI binary, provisionally named `warpctrl`, that lets developers script the same classes of user-visible actions they can already perform inside the running app: manipulating windows, tabs, panes, sessions, appearance, settings, and selected UI surfaces. The CLI should operate against one or more already-running local Warp app processes through a stable machine protocol, with deterministic target selection and clear errors when a process or target is ambiguous.
 ## Problem
 Warp already has rich interactive actions, but they are primarily reachable through UI, keybindings, menus, or deeplinks. Developers cannot reliably compose those same actions into shell scripts, demos, automation, or agent workflows, and there is no general local protocol for addressing a specific running Warp instance, window, pane, or session.
 ## Goals / Non-goals
 Goals:
-- Provide a first-class, scriptable standalone local CLI binary for controlling running Warp app processes.
+- Provide a first-class, scriptable standalone `warpctrl` binary for controlling running Warp app processes.
 - Keep CLI startup lightweight by avoiding GUI-app startup or full terminal initialization for routine control commands.
 - Keep the surface allowlisted and finite instead of exposing arbitrary internal actions.
 - Make targeting explicit and deterministic across multiple Warp processes, windows, tabs, panes, and sessions.
@@ -15,7 +15,7 @@ Non-goals:
 - Exposing every internal app action, debug action, developer-only helper, or privileged state mutation.
 - Treating the CLI as a general RPC escape hatch into Warp internals.
 - Requiring developers or automation to spawn the Warp GUI executable in CLI mode for ordinary control commands.
-- Requiring the first implementation PR to ship every action in the catalog.
+- Requiring the first implementation slice to ship every action in the catalog.
 ## Behavior
 1. The Warp control CLI operates only on running local Warp app processes. If no compatible Warp process is available, the CLI exits non-zero with a clear “no running Warp instance found” error.
 2. The CLI exposes only explicitly allowlisted actions. Unknown action names, unsupported parameter combinations, or requests for non-allowlisted capabilities fail with structured errors; they are never forwarded to arbitrary internal dispatch.
@@ -29,17 +29,17 @@ Non-goals:
    - Any selector that was ambiguous, missing, stale, unsupported, or invalid.
 5. The CLI supports human-readable output by default and JSON output for scripts. JSON output has stable field names and is available for discovery commands, read commands, successful mutations, and failures.
 6. The CLI supports process discovery and instance selection:
-   - `warp instances list` returns all reachable local Warp app processes that support the protocol.
+   - `warpctrl instance list` returns all reachable local Warp app processes that support the protocol.
    - Each process has an opaque `instance_id`, a channel/build identity, and enough display metadata for a developer to choose it.
    - If exactly one compatible process is available, commands may target it implicitly.
    - If multiple compatible processes are available, the CLI may select a single clearly active/frontmost instance when that state is unambiguous; otherwise it fails and asks the developer to pass an explicit instance selector.
    - Developers can explicitly choose an instance by opaque instance ID. Channel or PID filters may be offered as convenience filters, but opaque instance ID is the canonical selector.
 7. The CLI supports introspection for target discovery:
-   - `warp windows list`
-   - `warp tabs list`
-   - `warp panes list`
-   - `warp sessions list`
-   - `warp active get`
+   - `warpctrl window list`
+   - `warpctrl tab list`
+   - `warpctrl pane list`
+   - `warpctrl session list`
+   - `warpctrl app active`
    These commands return opaque protocol-facing IDs and enough metadata for subsequent commands without requiring knowledge of internal Warp identifiers.
 8. The target selector model is hierarchical:
    - Instance selector resolves a running Warp process.
@@ -132,15 +132,16 @@ Non-goals:
    - Arbitrary cloud object mutation or broad Warp Drive CRUD.
    - Arbitrary internal view dispatch by string.
    - Arbitrary setting names outside the allowlist.
-27. CLI command names should be noun-oriented and discoverable. The standalone control CLI should expose a `warp ...` command surface:
-   - `warp instances list`
-   - `warp active get`
-   - `warp pane split --direction right`
-   - `warp pane split --instance <id> --window active --pane active --direction right`
-   - `warp theme set "Warp Dark"`
-   - `warp settings set appearance.themes.system_theme true`
-   - `warp input insert "cargo check" --replace`
-   Channelized install names or aliases may vary during packaging, but the product-level command surface should converge on `warp`.
+27. CLI command names should be noun-oriented and discoverable. During the provisional standalone-binary phase, the control CLI should expose a `warpctrl ...` command surface:
+   - `warpctrl instance list`
+   - `warpctrl app active`
+   - `warpctrl tab create`
+   - `warpctrl pane split --direction right`
+   - `warpctrl pane split --instance <id> --window active --pane active --direction right`
+   - `warpctrl theme set "Warp Dark"`
+   - `warpctrl setting set appearance.themes.system_theme true`
+   - `warpctrl input insert "cargo check" --replace`
+   Channelized install names or aliases may vary during packaging. If the product later converges on `warp ...`, update packaging, shell completions, and operator docs together.
 28. The wire protocol mirrors the CLI model. A mutating request contains:
    - An action name from the allowlist.
    - A structured target selector.
@@ -157,10 +158,10 @@ Non-goals:
    - Running a session-scoped command against a non-terminal pane.
    - Focusing a window that has closed.
    - Setting a theme that is not available in that instance.
-33. The first implementation PR should ship the smallest end-to-end vertical slice that proves:
+33. The first `warpctrl` implementation slice should ship the smallest end-to-end vertical slice that proves:
    - Process discovery and target resolution work.
    - A standalone CLI binary can reach a running local Warp process without launching or initializing the GUI app.
-   - One pane/layout mutation works end-to-end.
-   - One settings/appearance mutation works end-to-end.
-   Recommended first actions are active-pane split and theme selection, plus the minimum health/introspection commands needed to exercise them.
-34. A follow-up PR should fill out the remaining catalog in parallelizable groups once the protocol, discovery model, target resolution, error model, and standalone CLI packaging shape have been validated by the first PR.
+   - `warpctrl tab create` creates a new terminal tab in the selected running instance.
+   - The command returns a structured success or failure payload suitable for human-readable and JSON output.
+   The first slice should include the minimum health/introspection commands needed to discover a running instance and exercise `tab.create`.
+34. Follow-up PRs should fill out the remaining catalog in parallelizable groups once the protocol, discovery model, target resolution, error model, `tab.create` action path, and standalone `warpctrl` packaging shape have been validated by the first slice.

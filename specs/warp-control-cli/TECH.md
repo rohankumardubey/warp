@@ -1,5 +1,5 @@
 # Context
-`PRODUCT.md` defines a standalone local Warp control CLI binary with an allowlisted action catalog, deterministic addressing across multiple running Warp app processes, and a two-phase implementation plan.
+`PRODUCT.md` defines a standalone local Warp control CLI binary, provisionally named `warpctrl`, with an allowlisted action catalog, deterministic addressing across multiple running Warp app processes, and an incremental implementation plan.
 The existing app already has three relevant building blocks:
 - `crates/http_server/src/lib.rs (7-61)` runs a native-only loopback Axum server on fixed port `9277`.
 - `app/src/lib.rs (1993-2001)` registers that HTTP server in the native app and currently merges only installation-detection and profiling routers.
@@ -7,6 +7,8 @@ The existing app already has three relevant building blocks:
 Warp also already has the app-side behaviors the control API should reuse rather than reimplement:
 - `app/src/terminal/view/action.rs (193-196)` defines split-pane terminal actions.
 - `app/src/pane_group/mod.rs (4266-4360, 5377-5414)` shows pane creation/splitting semantics and how split events mutate pane layout.
+- `app/src/workspace/action.rs (153-156)` defines the existing tab creation actions, including default and terminal-tab variants.
+- `app/src/workspace/view.rs (21203-21244)` shows how user-visible default and terminal-tab actions are dispatched.
 - `app/src/settings/theme.rs (9-82)` defines persisted theme settings.
 - `app/src/themes/theme_chooser.rs (416-458)` shows persisted theme selection behavior.
 - `app/src/workspace/action.rs (95-776)` is the largest existing inventory of user-visible workspace actions and informs the allowlist catalog.
@@ -34,20 +36,16 @@ Create a small shared protocol crate or equivalent shared module used by both th
 - Allowlisted `ControlAction` variants and typed parameter payloads.
 - Success/error envelopes with stable machine-readable error codes.
 The protocol should treat target IDs as opaque. The app may encode existing runtime identifiers internally, but the public wire contract should not require callers to understand `EntityId`, `PaneId`, or other implementation types.
-Recommended top-level request shape:
+Recommended top-level request shape for `tab.create`:
 ```json
 {
   "protocol_version": 1,
   "request_id": "client-generated-id",
-  "action": "pane.split",
+  "action": "tab.create",
   "target": {
-    "window": "active",
-    "tab": "active",
-    "pane": "active"
+    "window": "active"
   },
-  "params": {
-    "direction": "right"
-  }
+  "params": {}
 }
 ```
 Recommended response shape:
@@ -59,8 +57,7 @@ Recommended response shape:
   "instance_id": "opaque-instance-id",
   "resolved_target": {
     "window_id": "opaque-window-id",
-    "tab_id": "opaque-tab-id",
-    "pane_id": "opaque-pane-id"
+    "tab_id": "opaque-tab-id"
   },
   "result": {}
 }
@@ -80,7 +77,7 @@ Recommended design:
   - start timestamp
   - local-auth material reference or token metadata
 - The CLI loads discovery records, removes or ignores stale records after health checks, and chooses an instance using the product selector rules.
-- `instances list` is a CLI-first projection of this discovery registry plus health responses.
+- `warpctrl instance list` is a CLI-first projection of this discovery registry plus health responses.
 This design preserves the current `9277` behavior while avoiding cross-process port contention for the new control API.
 ### 3. Local authentication boundary
 Mutating localhost routes should not copy the permissive CORS posture of `/install_detection`.
@@ -136,29 +133,29 @@ Recommended modules/families:
 - Panels/surfaces:
   - settings/page/search, palettes, left/right panels, Drive, resource center, code review, vertical tabs, AI assistant.
 Do not use a generic “dispatch action by string” endpoint. Every handler should be reachable only through an explicit `ControlAction` variant.
-### 7. First PR: prove the end-to-end vertical slice
-The first implementation PR should land the minimum cross-cutting architecture plus one or two representative mutations:
+### 7. First slice: prove discovery and `tab.create`
+The first `warpctrl` implementation slice should land the minimum cross-cutting architecture plus a single representative tab mutation:
 - Shared protocol types and error envelopes.
 - Discovery registry and CLI instance selection.
-- A standalone CLI binary or artifact path that runs control commands without starting the GUI app runtime.
+- A standalone `warpctrl` binary or artifact path that runs control commands without starting the GUI app runtime.
 - Per-process authenticated local-control server.
 - App-side request bridge and selector resolver.
-- Read-only `ping/version` plus `instances list` or equivalent minimal discovery command.
-- End-to-end `pane.split` for the active pane.
-- End-to-end `theme.set` for a named fixed theme.
-Why these two actions:
-- `pane.split` proves a UI/layout action can be targeted and executed against live app state.
-- `theme.set` proves a persisted settings mutation can be invoked remotely and reflected in the running app.
+- Read-only `ping/version` plus `warpctrl instance list` or equivalent minimal discovery command.
+- End-to-end `warpctrl tab create` for the selected instance, reusing the same app behavior as the user-visible new-terminal-tab action.
+Why `tab.create` first:
+- It proves a UI/layout action can be targeted and executed against live app state.
+- It exercises process discovery, local authentication, request bridging, selector defaults, app-context dispatch, and structured success/error output without introducing higher-risk terminal input execution.
+- It gives operators a concise end-to-end smoke test: discover a running instance, create a tab, and confirm the live app changed.
 The PR should also introduce the shell-facing CLI command grammar that the remainder of the protocol will reuse and establish a lightweight CLI startup path distinct from GUI startup.
-### 8. Second PR: fill out the remaining protocol in parallel
-After the first PR validates discovery, auth, selector resolution, CLI syntax, and server-to-app execution, a second PR can add the remaining allowlisted catalog in parallelized action-family slices. The baseline code should make new action additions mostly additive:
+### 8. Follow-up slices: fill out the remaining protocol in parallel
+After the first slice validates discovery, auth, selector resolution, CLI syntax, and server-to-app execution, follow-up slices can add the remaining allowlisted catalog in parallelized action-family groups. The baseline code should make new action additions mostly additive:
 - Extend `ControlAction`.
 - Add typed params/results.
 - Add a handler.
 - Add validation/tests.
 - Add CLI surface/tests.
 ### 9. CLI packaging and release shape
-The shipped product shape should be a separate bundled CLI binary that reuses shared CLI/protocol crates but does not depend on launching the GUI binary in command mode. Follow the Oz CLI release model as closely as practical:
+The shipped product shape should be a separate bundled `warpctrl` CLI binary that reuses shared CLI/protocol crates but does not depend on launching the GUI binary in command mode. Follow the Oz CLI release model as closely as practical:
 - macOS:
   - Add a standalone control CLI artifact path next to the existing Oz standalone CLI artifact flow.
   - If the app bundle also exposes a wrapper/install flow, keep channelized naming consistent with the final product name decision.
@@ -172,8 +169,8 @@ Startup and dependency expectations:
 - The CLI should not initialize GUI state, rendering, terminal session models, app workspaces, or other main-app-only subsystems.
 - Startup cost should be treated as part of the product contract because control commands are expected to compose naturally in scripts and repeated interactive shell usage.
 Naming decision:
-- Product examples use `warp ...`, and that should be the target public command surface.
-- Final artifact filenames, channelized aliases, and installer exposure should be chosen before implementation to avoid churn in bundle scripts, docs, shell completions, and release workflow files.
+- Product examples use provisional `warpctrl ...` command lines for the standalone local-control binary.
+- Final artifact filenames, channelized aliases, and installer exposure should be chosen before broad rollout to avoid churn in bundle scripts, docs, shell completions, and release workflow files.
 ## End-to-end flow
 ```mermaid
 sequenceDiagram
@@ -190,12 +187,12 @@ sequenceDiagram
     CLI->>PROC: Health/protocol check for candidates
     PROC-->>CLI: Instance metadata + compatibility
     CLI->>CLI: Resolve instance selector
-    CLI->>HTTP: Authenticated POST action request
+    CLI->>HTTP: Authenticated POST tab.create request
     HTTP->>BRIDGE: Typed request + response channel
     BRIDGE->>RES: Resolve window/tab/pane/session selectors
     RES-->>BRIDGE: Concrete target handles or typed error
     BRIDGE->>ACT: Execute allowlisted ControlAction
-    ACT->>UI: Reuse existing app action/settings behavior
+    ACT->>UI: Reuse existing tab creation behavior
     UI-->>ACT: Mutation/read result
     ACT-->>BRIDGE: Typed result
     BRIDGE-->>HTTP: Response envelope
@@ -212,35 +209,32 @@ Map tests directly to `PRODUCT.md` behavior.
   - Selector-resolution unit tests for active, explicit ID, index, stale target, ambiguous target, and non-terminal session target.
   - Tests that no lower-level selector silently retargets after an explicit stale selector fails.
 - Behavior 15-28:
-  - Parser/serde tests for every first-PR `ControlAction` variant.
+  - Parser/serde tests for every first-slice `ControlAction` variant.
   - Router tests proving unknown/unallowlisted actions are rejected.
   - CLI parse/output tests for pretty and JSON rendering.
-- Behavior 19 and 33:
-  - App-side tests for active-pane split using the existing pane/layout helpers or a narrow extracted helper.
-  - Manual local verification that `warp pane split --direction right` changes a running app as expected.
-- Behavior 21-23 and 33:
-  - App-side tests for setting a fixed theme and observing persisted theme model changes.
-  - Manual local verification that `warp theme set ...` changes the running app and persists according to existing setting semantics.
+- Behavior 18 and 33:
+  - App-side tests for `tab.create` using existing workspace/tab helpers or a narrow extracted helper.
+  - Manual local verification that `warpctrl tab create` creates a terminal tab in a running app.
 - Behavior 30:
   - Multi-process integration-style coverage using two synthetic discovery records and mock health responders, plus manual testing with multiple channel builds where practical.
 - Packaging:
-  - `--artifact cli`-style bundle smoke tests or script-level checks for each supported platform path touched by the first PR.
-  - Startup-path tests or focused checks confirming the standalone CLI dispatches commands without entering GUI-app launch code.
+  - `--artifact cli`-style bundle smoke tests or script-level checks for each supported platform path touched by the first slice.
+  - Startup-path tests or focused checks confirming `warpctrl` dispatches commands without entering GUI-app launch code.
   - Shell completions/help output checks once final command naming is selected.
 ## Parallelization
-The first PR should stay mostly sequential because protocol envelope, discovery, authentication, selector resolution, and the two proof actions are tightly coupled and need one coherent architecture.
-The second PR is a strong fit for remote Oz cloud-agent fan-out after the first PR lands. Proposed parallel workstreams:
+The first slice should stay mostly sequential because protocol envelope, discovery, authentication, selector resolution, and `tab.create` are tightly coupled and need one coherent architecture.
+The follow-up catalog expansion is a strong fit for remote Oz cloud-agent fan-out after the first slice lands. Proposed parallel workstreams:
 - `control-window-tab-pane` — remote agent owns window/tab/pane action expansion, including CLI syntax, protocol variants, app handlers, and tests. Branch suggestion: `zach/warp-control-cli-window-tab-pane`.
 - `control-settings-appearance` — remote agent owns settings/theme/font/zoom allowlist expansion and validation. Branch suggestion: `zach/warp-control-cli-settings-appearance`.
 - `control-input-surfaces` — remote agent owns session/input plus panel/palette/settings-surface commands, with extra care around command execution risk. Branch suggestion: `zach/warp-control-cli-input-surfaces`.
 - `control-introspection-packaging` — remote agent owns richer list/read commands, documentation/examples, and any follow-on bundle/release plumbing not completed in PR1. Branch suggestion: `zach/warp-control-cli-introspection-packaging`.
 Merge strategy:
-- Each remote agent works from the first PR’s merged baseline or a designated PR2 integration base.
+- Each remote agent works from the first slice’s merged baseline or a designated follow-up integration base.
 - Each returns a branch or compact patch plus validation notes.
 - A lead integrator folds accepted slices into one combined second PR so the public protocol remains coherent.
 ```mermaid
 flowchart LR
-    P1["PR1 merged<br/>protocol + discovery + bridge + split/theme"] --> Launch["Launch PR2 cloud agents"]
+    P1["First slice merged<br/>protocol + discovery + bridge + tab.create"] --> Launch["Launch follow-up cloud agents"]
     Launch --> A["control-window-tab-pane"]
     Launch --> B["control-settings-appearance"]
     Launch --> C["control-input-surfaces"]
@@ -265,11 +259,11 @@ flowchart LR
   - Mitigation: allowlisted setting keys only, with private/debug/derived settings rejected.
 - Command execution risk:
   - Mitigation: keep `input.run`/session execution in the catalog but require explicit follow-up product/review decision before broad rollout.
-- Packaging churn due to unresolved executable naming:
-  - Mitigation: settle naming before touching bundle scripts and release workflow files.
+- Packaging churn due to provisional executable naming:
+  - Mitigation: document `warpctrl` as provisional and settle final aliases before broad release workflow rollout.
 - Heavyweight CLI startup caused by sharing the GUI binary's launch path:
   - Mitigation: ship a separate control CLI artifact with a narrow initialization path and keep GUI-only subsystems out of ordinary CLI command execution.
 ## Follow-ups
-- Decide the final artifact filename/channel alias scheme around the `warp ...` public command surface.
+- Decide the final artifact filename/channel alias scheme around the provisional `warpctrl ...` public command surface.
 - Decide whether Windows should follow the current Oz wrapper pattern indefinitely or gain standalone control CLI artifacts.
 - Decide whether a future subscription/watch protocol is useful for scripts that want live state changes, rather than single request/response calls only.
