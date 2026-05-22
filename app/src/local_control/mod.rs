@@ -1,5 +1,8 @@
+use std::collections::HashMap;
 use std::net::SocketAddr;
+use std::sync::{Arc, Mutex};
 
+use ::local_control::auth::{CredentialGrant, CredentialRequest, ScopedCredential};
 use ::local_control::protocol::{PaneTarget, TabTarget, TargetSelector, WindowTarget};
 use ::local_control::{
     ActionKind, AuthToken, ControlEndpoint, ControlError, ControlResponse, ErrorCode,
@@ -12,6 +15,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
+use chrono::Duration;
 use serde_json::json;
 use warp_core::channel::ChannelState;
 use warpui::{Entity, ModelContext, ModelSpawner, SingletonEntity, TypedActionView};
@@ -20,8 +24,9 @@ use crate::workspace::{Workspace, WorkspaceAction};
 
 #[derive(Clone)]
 struct ControlServerState {
-    auth_token: AuthToken,
     bridge_spawner: ModelSpawner<LocalControlBridge>,
+    instance_id: InstanceId,
+    credentials: Arc<Mutex<HashMap<String, CredentialGrant>>>,
 }
 
 pub struct LocalControlServer {
@@ -80,26 +85,27 @@ impl LocalControlServer {
                 err.to_string(),
             )
         })?;
-        let auth_token = AuthToken::generate();
         let record = InstanceRecord::for_current_process(
             ControlEndpoint::localhost(port.port()),
-            &auth_token,
             ChannelState::channel().to_string(),
             ChannelState::app_id().to_string(),
             ChannelState::app_version().map(str::to_owned),
-            capabilities(),
+            ActionKind::implemented_metadata(),
         );
+        let instance_id = record.instance_id.clone();
         let bridge_spawner = LocalControlBridge::handle(ctx).update(ctx, |bridge, ctx| {
-            bridge.set_instance_id(record.instance_id.clone());
+            bridge.set_instance_id(instance_id.clone());
             ctx.spawner()
         });
         let registered_instance = RegisteredInstance::register(record)?;
         let state = ControlServerState {
-            auth_token,
             bridge_spawner,
+            instance_id,
+            credentials: Arc::default(),
         };
         let router = Router::new()
             .route("/v1/control", post(handle_control_request))
+            .route("/v1/control/credentials", post(handle_credential_request))
             .with_state(state);
         runtime.spawn(async move {
             if let Err(err) = axum::serve(listener, router).await {
@@ -135,6 +141,7 @@ impl LocalControlBridge {
     fn handle_request(
         &mut self,
         request: RequestEnvelope,
+        grant: CredentialGrant,
         ctx: &mut ModelContext<Self>,
     ) -> ResponseEnvelope {
         if request.protocol_version != PROTOCOL_VERSION {
@@ -146,71 +153,26 @@ impl LocalControlBridge {
                 ),
             );
         }
+        if let Err(error) = grant.verify_for_action(request.action.kind) {
+            return ResponseEnvelope::error(request.request_id, error);
+        }
+        if !request.action.kind.is_implemented() {
+            return ResponseEnvelope::error(
+                request.request_id,
+                ControlError::new(
+                    ErrorCode::UnsupportedAction,
+                    format!(
+                        "{} is not implemented by this local-control bridge",
+                        request.action.kind.as_str()
+                    ),
+                ),
+            );
+        }
         match request.action.kind {
-            ActionKind::AppPing => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "ok": true,
-                    "pid": std::process::id(),
-                    "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
-                }),
-            ),
-            ActionKind::AppInspect => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "pid": std::process::id(),
-                    "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
-                    "channel": ChannelState::channel().to_string(),
-                    "app_id": ChannelState::app_id().to_string(),
-                    "app_version": ChannelState::app_version(),
-                    "window_count": ctx.window_ids().count(),
-                    "has_active_window": ctx.windows().active_window().is_some(),
-                }),
-            ),
-            ActionKind::AppVersion => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "channel": ChannelState::channel().to_string(),
-                    "app_id": ChannelState::app_id().to_string(),
-                    "app_version": ChannelState::app_version(),
-                    "protocol_version": PROTOCOL_VERSION,
-                }),
-            ),
-            ActionKind::AppActive => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
-                    "window_count": ctx.window_ids().count(),
-                    "has_active_window": ctx.windows().active_window().is_some(),
-                }),
-            ),
-            ActionKind::WindowList => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "window_count": ctx.window_ids().count(),
-                    "has_active_window": ctx.windows().active_window().is_some(),
-                }),
-            ),
-            ActionKind::TabList | ActionKind::PaneList | ActionKind::SessionList => {
-                ResponseEnvelope::ok(
-                    request.request_id,
-                    json!({
-                        "items": [],
-                        "enumeration": "not_yet_implemented",
-                    }),
-                )
-            }
             ActionKind::TabCreate => match self.create_terminal_tab(&request.target, ctx) {
                 Ok(data) => ResponseEnvelope::ok(request.request_id, data),
                 Err(error) => ResponseEnvelope::error(request.request_id, error),
             },
-            ActionKind::SettingList => ResponseEnvelope::ok(
-                request.request_id,
-                json!({
-                    "settings": [],
-                    "enumeration": "not_yet_implemented",
-                }),
-            ),
             action => ResponseEnvelope::error(
                 request.request_id,
                 ControlError::new(
@@ -230,22 +192,18 @@ impl LocalControlBridge {
         ctx: &mut ModelContext<Self>,
     ) -> Result<serde_json::Value, ControlError> {
         validate_tab_create_target(target)?;
-        let window_id = ctx
-            .windows()
-            .active_window()
-            .or_else(|| ctx.windows().ordered_window_ids().into_iter().next())
-            .ok_or_else(|| {
-                ControlError::new(
-                    ErrorCode::InvalidSelector,
-                    "tab.create requires at least one open Warp window",
-                )
-            })?;
+        let window_id = ctx.windows().active_window().ok_or_else(|| {
+            ControlError::new(
+                ErrorCode::MissingTarget,
+                "tab.create requires an active Warp window",
+            )
+        })?;
         let workspace = ctx
             .views_of_type::<Workspace>(window_id)
             .and_then(|workspaces| workspaces.into_iter().next())
             .ok_or_else(|| {
                 ControlError::new(
-                    ErrorCode::InvalidSelector,
+                    ErrorCode::MissingTarget,
                     "tab.create could not resolve an active workspace",
                 )
             })?;
@@ -281,6 +239,92 @@ impl LocalControlBridge {
     }
 }
 
+async fn handle_credential_request(
+    State(state): State<ControlServerState>,
+    payload: Result<Json<CredentialRequest>, JsonRejection>,
+) -> Response {
+    let request = match payload {
+        Ok(Json(request)) => request,
+        Err(err) => {
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponseEnvelope::new(ControlError::with_details(
+                    ErrorCode::InvalidRequest,
+                    "failed to decode local-control credential request",
+                    err.to_string(),
+                ))),
+            )
+                .into_response();
+        }
+    };
+    if request.protocol_version != PROTOCOL_VERSION {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::ProtocolVersionUnsupported,
+                format!("unsupported protocol version {}", request.protocol_version),
+            ))),
+        )
+            .into_response();
+    }
+    let metadata = request.action.metadata();
+    if !request.action.is_implemented() {
+        return (
+            StatusCode::BAD_REQUEST,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::UnsupportedAction,
+                format!(
+                    "{} is not implemented by this local-control bridge",
+                    request.action.as_str()
+                ),
+            ))),
+        )
+            .into_response();
+    }
+    if !metadata
+        .allowed_invocation_contexts
+        .contains(&request.invocation_context)
+    {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::ExecutionContextNotAllowed,
+                format!(
+                    "{} cannot run from the requested invocation context",
+                    request.action.as_str()
+                ),
+            ))),
+        )
+            .into_response();
+    }
+    let auth_token = AuthToken::generate();
+    let grant = CredentialGrant::new(
+        state.instance_id.clone(),
+        request.action,
+        request.invocation_context,
+        Duration::minutes(5),
+    );
+    let mut credentials = match state.credentials.lock() {
+        Ok(credentials) => credentials,
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponseEnvelope::new(ControlError::new(
+                    ErrorCode::Internal,
+                    "local-control credential broker is unavailable",
+                ))),
+            )
+                .into_response();
+        }
+    };
+    credentials.insert(auth_token.secret().to_owned(), grant.clone());
+    Json(ScopedCredential {
+        bearer_token: auth_token.secret().to_owned(),
+        grant,
+    })
+    .into_response()
+}
+
 async fn handle_control_request(
     State(state): State<ControlServerState>,
     headers: HeaderMap,
@@ -289,13 +333,16 @@ async fn handle_control_request(
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
-    if let Err(error) = state.auth_token.verify_authorization_header(auth_header) {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(ErrorResponseEnvelope::new(error)),
-        )
-            .into_response();
-    }
+    let auth_token = match AuthToken::from_authorization_header(auth_header) {
+        Ok(token) => token,
+        Err(error) => {
+            return (
+                StatusCode::UNAUTHORIZED,
+                Json(ErrorResponseEnvelope::new(error)),
+            )
+                .into_response();
+        }
+    };
     let request = match payload {
         Ok(Json(request)) => request,
         Err(err) => {
@@ -310,10 +357,33 @@ async fn handle_control_request(
                 .into_response();
         }
     };
+    let grant = match state.credentials.lock() {
+        Ok(credentials) => credentials.get(auth_token.secret()).cloned(),
+        Err(_) => {
+            return (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(ErrorResponseEnvelope::new(ControlError::new(
+                    ErrorCode::Internal,
+                    "local-control credential broker is unavailable",
+                ))),
+            )
+                .into_response();
+        }
+    };
+    let Some(grant) = grant else {
+        return (
+            StatusCode::UNAUTHORIZED,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::UnauthorizedLocalClient,
+                "local-control credential is invalid",
+            ))),
+        )
+            .into_response();
+    };
     let request_id = request.request_id;
     let response = match state
         .bridge_spawner
-        .spawn(move |bridge, ctx| bridge.handle_request(request, ctx))
+        .spawn(move |bridge, ctx| bridge.handle_request(request, grant, ctx))
         .await
     {
         Ok(response) => response,
@@ -352,59 +422,6 @@ fn validate_tab_create_target(target: &TargetSelector) -> Result<(), ControlErro
         ));
     }
     Ok(())
-}
-
-fn capabilities() -> Vec<ActionKind> {
-    vec![
-        ActionKind::AppPing,
-        ActionKind::AppInspect,
-        ActionKind::AppVersion,
-        ActionKind::AppActive,
-        ActionKind::AppFocus,
-        ActionKind::AppSettingsOpen,
-        ActionKind::AppCommandPaletteOpen,
-        ActionKind::AppCommandSearchOpen,
-        ActionKind::AppWarpDriveOpen,
-        ActionKind::AppWarpDriveToggle,
-        ActionKind::AppResourceCenterToggle,
-        ActionKind::AppAiAssistantToggle,
-        ActionKind::AppCodeReviewToggle,
-        ActionKind::AppVerticalTabsToggle,
-        ActionKind::WindowList,
-        ActionKind::WindowCreate,
-        ActionKind::WindowFocus,
-        ActionKind::WindowClose,
-        ActionKind::TabList,
-        ActionKind::TabCreate,
-        ActionKind::TabActivate,
-        ActionKind::TabMove,
-        ActionKind::TabRename,
-        ActionKind::TabClose,
-        ActionKind::PaneList,
-        ActionKind::PaneSplit,
-        ActionKind::PaneFocus,
-        ActionKind::PaneNavigate,
-        ActionKind::PaneClose,
-        ActionKind::PaneMaximize,
-        ActionKind::PaneResize,
-        ActionKind::PaneSessionPrevious,
-        ActionKind::PaneSessionNext,
-        ActionKind::SessionList,
-        ActionKind::InputInsert,
-        ActionKind::InputReplace,
-        ActionKind::InputClear,
-        ActionKind::InputModeSet,
-        ActionKind::ThemeList,
-        ActionKind::ThemeSet,
-        ActionKind::AppearanceGet,
-        ActionKind::AppearanceSet,
-        ActionKind::AppearanceFontSize,
-        ActionKind::AppearanceZoom,
-        ActionKind::SettingGet,
-        ActionKind::SettingList,
-        ActionKind::SettingSet,
-        ActionKind::SettingToggle,
-    ]
 }
 
 #[cfg(test)]

@@ -21,7 +21,7 @@ struct InstanceSummary {
     app_version: Option<String>,
     started_at: String,
     endpoint: ::local_control::discovery::ControlEndpoint,
-    capabilities: Vec<&'static str>,
+    actions: Vec<String>,
 }
 pub fn run_window_command(
     command: WindowCommand,
@@ -255,10 +255,10 @@ impl From<::local_control::discovery::InstanceRecord> for InstanceSummary {
             app_version: record.app_version,
             started_at: record.started_at.to_rfc3339(),
             endpoint: record.endpoint,
-            capabilities: record
-                .capabilities
+            actions: record
+                .actions
                 .into_iter()
-                .map(ActionKind::as_str)
+                .map(|metadata| metadata.name)
                 .collect(),
         }
     }
