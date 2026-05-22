@@ -1,10 +1,8 @@
-use crate::view_components::DismissibleToast;
-use crate::workspace::ToastStack;
-use crate::workspaces::user_workspaces::UserWorkspaces;
 use warp_cli::agent::Harness;
 use warp_core::ui::appearance::Appearance;
-use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors;
+use warp_editor::editor::NavigationKey;
 use warp_managed_secrets::client::SecretOwner;
 use warpui::elements::{
     Border, ChildAnchor, ChildView, Clipped, ConstrainedBox, Container, CornerRadius,
@@ -19,8 +17,8 @@ use warpui::{
 };
 
 use crate::ai::auth_secret_types::{
-    auth_secret_types_for_harness, build_managed_secret_value, learn_more_url_for_harness,
-    AuthSecretTypeInfo,
+    AuthSecretTypeInfo, auth_secret_types_for_harness, build_managed_secret_value,
+    learn_more_url_for_harness,
 };
 use crate::ai::harness_availability::{HarnessAvailabilityEvent, HarnessAvailabilityModel};
 use crate::ai::harness_display;
@@ -33,7 +31,9 @@ use crate::terminal::view::ambient_agent::auth_secret_ftux_dropdown::{
     AuthSecretFtuxDropdown, FtuxDropdownEvent,
 };
 use crate::ui_components::icons::Icon as UiIcon;
-use warp_editor::editor::NavigationKey;
+use crate::view_components::DismissibleToast;
+use crate::workspace::ToastStack;
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 const DESCRIPTION_FONT_SIZE: f32 = 14.;
 

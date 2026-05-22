@@ -1,14 +1,19 @@
-use crate::ai::agent::api::ServerConversationToken;
-use crate::ai::agent::conversation::{AIAgentHarness, ServerAIConversationMetadata};
+use std::collections::HashMap;
+
 use chrono::Utc;
 use pathfinder_geometry::vector::vec2f;
 use persistence::model::ConversationUsageMetadata;
 use session_sharing_protocol::sharer::SessionSourceType;
-use std::collections::HashMap;
 use warp_multi_agent_api::{self as api, client_action as api_client_action};
+use warpui::platform::WindowStyle;
+use warpui::{App, EntityId, TypedActionView, ViewHandle};
 
-use crate::ai::agent::conversation::{AIConversation, ConversationStatus};
+use super::*;
 use crate::ai::agent::AIAgentInput;
+use crate::ai::agent::api::ServerConversationToken;
+use crate::ai::agent::conversation::{
+    AIAgentHarness, AIConversation, ConversationStatus, ServerAIConversationMetadata,
+};
 use crate::ai::agent_conversations_model::{
     AgentConversationsModel, AgentConversationsModelEvent, AgentRunDisplayStatus,
 };
@@ -19,26 +24,20 @@ use crate::ai::ambient_agents::{
 use crate::ai::blocklist::history_model::BlocklistAIHistoryModel;
 use crate::auth::user::TEST_USER_UID;
 use crate::cloud_object::{Owner, Revision, ServerMetadata, ServerPermissions};
-use crate::server::ids::ServerId;
-use warpui::platform::WindowStyle;
-use warpui::{App, EntityId, TypedActionView, ViewHandle};
-
 use crate::context_chips::prompt_type::PromptType;
 use crate::editor::InteractionState;
-
-use crate::terminal::model::blocks::{ToTotalIndex as _, INLINE_BANNER_HEIGHT};
+use crate::server::ids::ServerId;
+use crate::terminal::TerminalView;
+use crate::terminal::model::blocks::{INLINE_BANNER_HEIGHT, ToTotalIndex as _};
+use crate::terminal::view::TerminalAction;
 #[cfg(all(feature = "local_fs", not(target_family = "wasm")))]
 use crate::terminal::view::ambient_agent::{
     HandoffSubmissionState, PendingHandoff, SnapshotUploadStatus,
 };
 use crate::terminal::view::shared_session::test_utils::terminal_view_for_viewer;
-use crate::terminal::view::TerminalAction;
-use crate::terminal::TerminalView;
 use crate::test_util::add_window_with_terminal;
 use crate::test_util::terminal::initialize_app_for_terminal_view;
-use crate::{assert_lines_approx_eq, FeatureFlag};
-
-use super::*;
+use crate::{FeatureFlag, assert_lines_approx_eq};
 
 #[test]
 fn test_prompt_context_menu_items_shared_session_viewer_no_edit_prompt() {
@@ -83,8 +82,8 @@ fn test_prompt_context_menu_items_shared_session_viewer_no_edit_prompt() {
 }
 
 #[test]
-fn test_on_ambient_agent_execution_ended_enables_followup_input_for_editable_non_owner_finished_view(
-) {
+fn test_on_ambient_agent_execution_ended_enables_followup_input_for_editable_non_owner_finished_view()
+ {
     let _handoff_flag = FeatureFlag::HandoffCloudCloud.override_enabled(true);
     let _setup_v2_flag = FeatureFlag::CloudModeSetupV2.override_enabled(true);
 
@@ -478,8 +477,8 @@ fn test_on_session_share_ended_restores_size_after_viewer_driven_resize() {
 }
 
 #[test]
-fn test_on_session_share_ended_does_not_insert_tombstone_for_ambient_session_under_cloud_mode_setup_v2(
-) {
+fn test_on_session_share_ended_does_not_insert_tombstone_for_ambient_session_under_cloud_mode_setup_v2()
+ {
     let _flag = FeatureFlag::CloudModeSetupV2.override_enabled(true);
 
     App::test((), |mut app| async move {
@@ -1268,8 +1267,8 @@ fn test_on_session_share_ended_clears_frozen_followup_input_for_owned_ambient_se
 }
 
 #[test]
-fn test_on_session_share_ended_does_not_insert_tombstone_for_non_ambient_session_under_cloud_mode_setup_v2(
-) {
+fn test_on_session_share_ended_does_not_insert_tombstone_for_non_ambient_session_under_cloud_mode_setup_v2()
+ {
     let _flag = FeatureFlag::CloudModeSetupV2.override_enabled(true);
 
     App::test((), |mut app| async move {

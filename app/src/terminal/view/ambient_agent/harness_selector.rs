@@ -5,21 +5,19 @@
 use std::sync::Arc;
 
 use pathfinder_geometry::vector::vec2f;
+use settings::Setting as _;
+use warp_cli::agent::Harness;
+use warp_core::ui::appearance::Appearance;
+use warp_core::ui::theme::Fill;
+use warp_core::ui::theme::color::internal_colors;
+use warpui::elements::{
+    Border, ChildAnchor, ChildView, OffsetPositioning, ParentAnchor, ParentElement as _,
+    ParentOffsetBounds, Stack,
+};
 use warpui::{
-    elements::{
-        Border, ChildAnchor, ChildView, OffsetPositioning, ParentAnchor, ParentElement as _,
-        ParentOffsetBounds, Stack,
-    },
     AppContext, Element, Entity, ModelHandle, SingletonEntity, TypedActionView, View, ViewContext,
     ViewHandle,
 };
-
-use warp_cli::agent::Harness;
-use warp_core::ui::appearance::Appearance;
-use warp_core::ui::theme::color::internal_colors;
-use warp_core::ui::theme::Fill;
-
-use settings::Setting as _;
 
 use crate::ai::blocklist::agent_view::agent_input_footer::AgentInputButtonTheme;
 use crate::ai::cloud_agent_settings::CloudAgentSettings;
@@ -350,9 +348,11 @@ impl TypedActionView for HarnessSelector {
                 });
                 // Persist the selection to settings for next time.
                 CloudAgentSettings::handle(ctx).update(ctx, |settings, ctx| {
-                    report_if_error!(settings
-                        .last_selected_harness
-                        .set_value(Some(harness.config_name().to_string()), ctx));
+                    report_if_error!(
+                        settings
+                            .last_selected_harness
+                            .set_value(Some(harness.config_name().to_string()), ctx)
+                    );
                 });
                 self.set_menu_visibility(false, ctx);
             }

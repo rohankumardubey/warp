@@ -4,6 +4,10 @@
 //! offering users the option to bring in the agent. For CLI agent commands (e.g., Claude Code,
 //! Gemini CLI, Codex), it displays a specialized footer with additional functionality.
 
+use base64::Engine;
+use session_sharing_protocol::sharer::SessionSourceType;
+use warpui::clipboard::{ClipboardContent, ImageData};
+
 use crate::ai::agent::ImageContext;
 use crate::ai::blocklist::agent_view::agent_input_footer::{
     AgentInputFooter, AgentInputFooterEvent,
@@ -11,72 +15,57 @@ use crate::ai::blocklist::agent_view::agent_input_footer::{
 use crate::terminal::cli_agent_sessions::listener::agent_supports_rich_status;
 use crate::terminal::cli_agent_sessions::{CLIAgentInputEntrypoint, CLIAgentSessionsModel};
 use crate::terminal::shared_session::{SharedSessionActionSource, SharedSessionScrollbackType};
-use crate::util::image::{infer_mime_type, MAX_IMAGE_SIZE_BYTES_FOR_CLI_AGENT, MIME_SNIFF_BYTES};
-use base64::Engine;
-use session_sharing_protocol::sharer::SessionSourceType;
-use warpui::clipboard::{ClipboardContent, ImageData};
+use crate::util::image::{MAX_IMAGE_SIZE_BYTES_FOR_CLI_AGENT, MIME_SNIFF_BYTES, infer_mime_type};
 mod warpify_footer;
-
-pub use crate::terminal::CLIAgent;
-use warpify_footer::{WarpifyFooterView, WarpifyFooterViewEvent};
 
 use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use warpui::r#async::Timer;
-
-use crate::code_review::diff_state::GitDeltaPreference;
-use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
 use anyhow::anyhow;
 use parking_lot::FairMutex;
 use pathfinder_color::ColorU;
-use warp_core::{
-    features::FeatureFlag,
-    report_error, send_telemetry_from_ctx,
-    settings::Setting,
-    ui::{
-        appearance::Appearance,
-        color::contrast::{
-            high_enough_contrast, pick_best_foreground_color, MinimumAllowedContrast,
-        },
-        theme::{color::internal_colors, Fill as ThemeFill},
-    },
+use warp_core::features::FeatureFlag;
+use warp_core::settings::Setting;
+use warp_core::ui::appearance::Appearance;
+use warp_core::ui::color::contrast::{
+    MinimumAllowedContrast, high_enough_contrast, pick_best_foreground_color,
 };
-
+use warp_core::ui::theme::Fill as ThemeFill;
+use warp_core::ui::theme::color::internal_colors;
+use warp_core::{report_error, send_telemetry_from_ctx};
+use warp_terminal::model::escape_sequences::{BRACKETED_PASTE_END, BRACKETED_PASTE_START};
+use warpify_footer::{WarpifyFooterView, WarpifyFooterViewEvent};
+use warpui::r#async::Timer;
+use warpui::elements::{
+    ChildView, Container, CrossAxisAlignment, Empty, Expanded, Flex, MainAxisSize, ParentElement,
+};
+use warpui::keymap::Keystroke;
 use warpui::{
-    elements::{
-        ChildView, Container, CrossAxisAlignment, Empty, Expanded, Flex, MainAxisSize,
-        ParentElement,
-    },
-    keymap::Keystroke,
     AppContext, Element, Entity, EntityId, ModelHandle, SingletonEntity, TypedActionView, View,
     ViewContext, ViewHandle,
 };
 
-use crate::{
-    ai::blocklist::{agent_view::agent_view_bg_fill, block::cli_controller::CLISubagentEvent},
-    cmd_or_ctrl_shift,
-    server::telemetry::{CLIAgentType, CLISubagentControlState, TelemetryEvent},
-    settings::{
-        AISettings, AISettingsChangedEvent, CompiledCommandsForCodingAgentToolbar,
-        InputModeSettings,
-    },
-    terminal::cli_agent_sessions::CLIAgentRichInputCloseReason,
-    terminal::{
-        model_events::{ModelEvent, ModelEventDispatcher},
-        TerminalModel,
-    },
-    ui_components::{blended_colors, icons::Icon},
-    view_components::action_button::{
-        ActionButton, ActionButtonTheme, ButtonSize, KeystrokeSource, TooltipAlignment,
-    },
-};
-
-use warp_terminal::model::escape_sequences::{BRACKETED_PASTE_END, BRACKETED_PASTE_START};
-
 use super::{RichContentInsertionPosition, TerminalAction, TerminalView};
+use crate::ai::blocklist::agent_view::agent_view_bg_fill;
+use crate::ai::blocklist::block::cli_controller::CLISubagentEvent;
+use crate::cmd_or_ctrl_shift;
+use crate::code_review::diff_state::GitDeltaPreference;
+use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
+use crate::server::telemetry::{CLIAgentType, CLISubagentControlState, TelemetryEvent};
+use crate::settings::{
+    AISettings, AISettingsChangedEvent, CompiledCommandsForCodingAgentToolbar, InputModeSettings,
+};
+pub use crate::terminal::CLIAgent;
+use crate::terminal::TerminalModel;
+use crate::terminal::cli_agent_sessions::CLIAgentRichInputCloseReason;
+use crate::terminal::model_events::{ModelEvent, ModelEventDispatcher};
 use crate::terminal::view::block_banner::WarpificationMode;
+use crate::ui_components::blended_colors;
+use crate::ui_components::icons::Icon;
+use crate::view_components::action_button::{
+    ActionButton, ActionButtonTheme, ButtonSize, KeystrokeSource, TooltipAlignment,
+};
 
 /// Small delay inserted between separate PTY writes to CLI agents.
 /// (Used both for the mode-switch prefix split and for the `DelayedEnter`
@@ -1429,8 +1418,10 @@ impl TypedActionView for UseAgentToolbar {
                     .should_render_use_agent_footer_for_user_commands
                     .set_value(false, ctx)
                 {
-                    report_error!(anyhow!("{e:?}")
-                        .context("Failed to set `ShouldRenderUseAgentToolbarForUserCommands`"));
+                    report_error!(
+                        anyhow!("{e:?}")
+                            .context("Failed to set `ShouldRenderUseAgentToolbarForUserCommands`")
+                    );
                 }
             });
         }

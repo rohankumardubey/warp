@@ -14,16 +14,17 @@ pub use load_ai_conversation::ConversationRestorationInNewPaneType;
 // TODO(advait): if we align on prompt suggestions banner in Input, move code out of inline_banner mod.
 pub(crate) mod init_environment;
 mod init_project;
-use crate::ai::block_context::BlockContext;
-#[cfg(feature = "local_fs")]
-use crate::ai::skills::SkillOpenOrigin;
-use crate::global_resource_handles::GlobalResourceHandlesProvider;
 pub use init_project::{
     InitActionResult, InitProjectModel, InitProjectModelEvent, InitStepBlock, InitStepKind,
     ProjectScopedRulesResult,
 };
 use onboarding::callout::{FinalState, OnboardingCalloutViewEvent, OnboardingQuery};
 use onboarding::{OnboardingCalloutView, OnboardingKeybindings};
+
+use crate::ai::block_context::BlockContext;
+#[cfg(feature = "local_fs")]
+use crate::ai::skills::SkillOpenOrigin;
+use crate::global_resource_handles::GlobalResourceHandlesProvider;
 pub(crate) mod docker_sandbox;
 mod link_detection;
 mod open_in_warp;
@@ -45,334 +46,6 @@ mod tooltips;
 pub mod use_agent_footer;
 mod zero_state_block;
 
-use warpui::clipboard_utils::get_image_filepaths_from_paths;
-
-use std::ops::Deref as _;
-
-use crate::ai::blocklist::agent_view::fork_from_last_known_good_state_exchange_id;
-use crate::ai::blocklist::agent_view::{
-    agent_view_bg_fill, get_agent_view_entry_block_position_id, AgentViewController,
-    AgentViewControllerEvent, AgentViewDisplayMode, AgentViewEntryBlockParams,
-    AgentViewEntryOrigin, AgentViewHeaderDisabledTheme, AgentViewHeaderTheme,
-    AgentViewZeroStateBlock, AgentViewZeroStateEvent, EphemeralMessageModel,
-    ExitConfirmationTrigger, InlineAgentViewHeader, OrchestrationPillBar,
-    ENTER_OR_EXIT_CONFIRMATION_WINDOW,
-};
-use crate::ai::conversation_utils;
-use crate::ai::predict::prompt_suggestions::{
-    has_pending_code_or_unit_test_prompt_suggestion,
-    is_accept_prompt_suggestion_bound_to_cmd_enter,
-    is_accept_prompt_suggestion_bound_to_ctrl_enter,
-};
-use crate::search::slash_command_menu::static_commands::commands;
-use crate::terminal::input::inline_menu::InlineMenuPositioner;
-use crate::terminal::view::passive_suggestions::PromptSuggestionResolution;
-pub use crate::terminal::view::rich_content::{
-    AIBlockMetadata, AgentViewEntryMetadata, RichContent, RichContentInsertionPosition,
-    RichContentMetadata,
-};
-use crate::terminal::view::zero_state_block::TerminalViewZeroStateBlock;
-use crate::view_components::action_button::{ActionButton, ButtonSize, KeystrokeSource};
-
-use use_agent_footer::UseAgentToolbar;
-
-use super::cli_agent;
-use super::CLIAgent;
-#[cfg(feature = "local_fs")]
-use crate::ai::agent::{CurrentHead, DiffBase};
-use crate::ai::agent_conversations_model::{AgentConversationsModel, AgentConversationsModelEvent};
-use crate::ai::ambient_agents::{
-    conversation_output_status_from_conversation, AmbientAgentTaskId, AmbientConversationStatus,
-};
-use crate::ai::blocklist::block::cli::{CLISubagentView, CLISubagentViewEvent};
-use crate::ai::blocklist::block::cli_controller::{
-    CLISubagentController, CLISubagentEvent, UserTakeOverReason,
-};
-use crate::ai::blocklist::block::status_bar::BlocklistAIStatusBarEvent;
-use crate::ai::blocklist::usage::conversation_usage_view::{
-    ConversationUsageInfo, ConversationUsageView, TimingInfo,
-};
-use crate::ai::blocklist::{block_context_from_terminal_model, SlashCommandRequest};
-use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel, AIDocumentVersion};
-use crate::ai::loading::shimmering_warp_loading_text;
-#[cfg(feature = "local_fs")]
-use crate::code_review::context::{
-    convert_file_diffs_to_diffset_hunks, create_attachment_reference_and_key,
-    register_diffset_attachment,
-};
-#[cfg(feature = "local_fs")]
-use crate::code_review::DiffSetScope;
-use crate::terminal::model::blocks::RemovableBlocklistItem;
-#[cfg(feature = "local_fs")]
-use crate::util::file::external_editor::{settings::EditorLayout, EditorSettings};
-use crate::util::truncation::truncate_from_end;
-
-use crate::ai::agent::api::ServerConversationToken;
-use crate::ai::agent::redaction::redact_secrets;
-use crate::ai::agent::todos::popup::{AgentTodosPopupEvent, AgentTodosPopupView};
-use crate::ai::agent::{
-    AIAgentPtyWriteMode, AgentReviewCommentBatch, CancellationReason, PassiveSuggestionTrigger,
-    ServerOutputId, ShellCommandCompletedTrigger,
-};
-use crate::ai::blocklist::block::{AIBlockAction, FinishReason};
-use crate::ai::blocklist::codebase_index_speedbump_banner::{
-    CodebaseIndexSpeedbumpBannerAction, CodebaseIndexSpeedbumpBannerState, VisibilityState,
-};
-use crate::ai::blocklist::model::{AIBlockModel, AIBlockModelHelper, AIBlockOutputStatus};
-#[cfg(feature = "local_fs")]
-use crate::ai::persisted_workspace::PersistedWorkspace;
-use crate::code_review::comments::{
-    convert_insert_review_comments, AttachedReviewComment, PendingImportedReviewComment,
-};
-#[cfg(feature = "local_fs")]
-use crate::code_review::diff_state::LocalDiffStateModel;
-use crate::code_review::diff_state::{DiffMode, GitDeltaPreference};
-#[cfg(feature = "local_fs")]
-use crate::code_review::git_status_update::{
-    GitRepoStatusModel, GitStatusMetadata, GitStatusUpdateModel,
-};
-use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
-use crate::projects::ProjectManagementModel;
-use crate::remote_server::manager::{
-    RemoteServerInitPhase, RemoteServerManager, RemoteServerManagerEvent,
-};
-use crate::settings::ai::FocusedTerminalInfo;
-use crate::settings_view::mcp_servers_page::MCPServersSettingsPage;
-use crate::terminal::cli_agent_sessions::event::{
-    parse_event, CLIAgentEvent, CLIAgentEventPayload, CLIAgentEventType,
-    CLI_AGENT_NOTIFICATION_SENTINEL,
-};
-use crate::terminal::cli_agent_sessions::listener::{
-    agent_supports_rich_status, is_agent_supported, CLIAgentSessionListener,
-};
-#[cfg(not(target_family = "wasm"))]
-use crate::terminal::cli_agent_sessions::plugin_manager::{plugin_manager_for, PluginModalKind};
-use crate::terminal::cli_agent_sessions::{
-    CLIAgentInputEntrypoint, CLIAgentInputState, CLIAgentRichInputCloseReason, CLIAgentSession,
-    CLIAgentSessionContext, CLIAgentSessionStatus, CLIAgentSessionsModel,
-    CLIAgentSessionsModelEvent,
-};
-use crate::terminal::view::init_environment::{
-    mode_selector::{
-        EnvironmentSetupMode, EnvironmentSetupModeSelector, EnvironmentSetupModeSelectorEvent,
-    },
-    InitEnvironmentBlock, InitEnvironmentBlockEvent,
-};
-use crate::terminal::view::ssh_remote_server_choice_view::{
-    SshRemoteServerChoiceView, SshRemoteServerChoiceViewEvent,
-};
-use crate::terminal::view::ssh_remote_server_failed_banner::{
-    SshRemoteServerFailedBanner, SshRemoteServerFailedBannerEvent,
-};
-use crate::terminal::view::telemetry::PromptSuggestionFallbackReason;
-use crate::workspace::view::cloud_agent_capacity_modal::CloudAgentCapacityModalVariant;
-use crate::workspaces::user_workspaces::UserWorkspacesEvent;
-
-pub use self::link_detection::GridHighlightedLink;
-pub use self::link_detection::{RichContentLink, RichContentLinkTooltipInfo};
-use crate::ai::llms::{LLMId, LLMModelHost, LLMPreferences};
-use crate::settings::CodeSettings;
-use crate::util::repo_detection::{detect_possible_git_repo, RepoDetectionSessionType};
-pub use action::{AgentOnboardingVersion, OnboardingIntention, OnboardingVersion, TerminalAction};
-use ai::api_keys::{ApiKeyManager, AwsCredentialsState};
-use ai::index::full_source_code_embedding::manager::{BuildSource, CodebaseIndexManager};
-pub use block_banner::{WithinBlockBanner, BLOCK_BANNER_HEIGHT};
-use block_onboarding::onboarding_agentic_suggestions_block::{
-    OnboardingAgenticSuggestionsBlock, OnboardingAgenticSuggestionsBlockEvent, OnboardingChipType,
-};
-use block_onboarding::onboarding_drive_sharing_block::OnboardingDriveSharingBlock;
-pub use init::{
-    init, CANCEL_COMMAND_KEYBINDING, TOGGLE_AUTOEXECUTE_MODE_KEYBINDING,
-    TOGGLE_HIDE_CLI_RESPONSES_KEYBINDING, TOGGLE_QUEUE_NEXT_PROMPT_KEYBINDING,
-};
-pub use inline_banner::{NotificationsDiscoveryBannerAction, NotificationsErrorBannerAction};
-#[cfg(not(target_family = "wasm"))]
-use repo_metadata::repositories::DetectedRepositories;
-use repo_metadata::repositories::RepoDetectionSource;
-use session_sharing_protocol::common::LongRunningCommandAgentInteractionState;
-use session_sharing_protocol::sharer::{RoleUpdateReason, SessionEndedReason, SessionSourceType};
-use ssh_file_upload::{FileUpload, FileUploadEvent};
-use uuid::Uuid;
-use warp_core::channel::ChannelState;
-use warp_util::local_or_remote_path::LocalOrRemotePath;
-use warpui::elements::{shimmering_text::ShimmeringTextStateHandle, Border, ChildView};
-use warpui::fonts::Properties;
-use warpui::{ViewHandle, WeakModelHandle};
-
-use crate::ai::agent::conversation::{AIConversation, AIConversationId, ConversationStatus};
-
-#[cfg(any(test, feature = "integration_tests"))]
-use crate::ai::agent::UserQueryMode;
-use crate::ai::agent::{
-    AIAgentActionType, AIAgentOutputStatus, AIAgentTextSection, EntrypointType,
-    FinishedAIAgentOutput, RenderableAIError, StaticQueryType,
-};
-use crate::ai::blocklist::agent_view::agent_input_footer::toolbar_item::AgentToolbarItemKind;
-use crate::ai::blocklist::suggested_agent_mode_workflow_modal::SuggestedAgentModeWorkflowAndId;
-use crate::ai::blocklist::suggested_rule_modal::SuggestedRuleAndId;
-use crate::ai::blocklist::PendingAttachment;
-use crate::ai::blocklist::{model::AIBlockModelImpl, ClientIdentifiers};
-use crate::ai::{
-    agent::{
-        AIAgentActionId, AIAgentCitation, AIAgentContext, AIAgentExchangeId, AIAgentInput,
-        FileLocations, PassiveCodeDiffEntry, PassiveSuggestionResultType,
-    },
-    blocklist::{
-        ai_brand_color, get_ai_block_overflow_menu_element_position_id,
-        get_attached_blocks_chip_element_position_id,
-        inline_action::code_diff_view::{CodeDiffView, FileDiff},
-        summarization_cancel_dialog::SummarizationCancelDialog,
-        telemetry_banner::{should_collect_ai_ugc_telemetry, TelemetryBanner},
-        AIBlock, AIBlockEvent, BlocklistAIActionEvent, BlocklistAIActionModel,
-        BlocklistAIContextEvent, BlocklistAIContextModel, BlocklistAIController,
-        BlocklistAIControllerEvent, BlocklistAIHistoryEvent, BlocklistAIHistoryModel,
-        BlocklistAIInputEvent, BlocklistAIInputModel, ConversationStatusUpdate, InputConfig,
-        InputType, LegacyPassiveSuggestionsEvent, LegacyPassiveSuggestionsModel,
-        MaaPassiveSuggestionsEvent, MaaPassiveSuggestionsModel, PassiveSuggestionsModels,
-        PendingQueryState, RequestFileEditsFormatKind, ShellCommandExecutor,
-        ShellCommandExecutorEvent, StartAgentExecutor, StartAgentExecutorEvent, StartAgentRequest,
-        ATTACH_AS_AGENT_MODE_CONTEXT_TEXT, PRE_REWIND_PREFIX,
-    },
-    execution_profiles::profiles::{AIExecutionProfilesModel, ClientProfileId},
-    get_relevant_files::controller::GetRelevantFilesController,
-};
-use crate::auth::auth_manager::AuthManager;
-use crate::auth::auth_state::AuthState;
-use crate::auth::auth_view_modal::AuthViewVariant;
-use crate::auth::{AuthStateProvider, UserUid};
-use crate::autoupdate::{self, get_update_state, AutoupdateStage};
-use crate::cloud_object::model::actions::ObjectActionType;
-use crate::cloud_object::model::persistence::CloudModel;
-use crate::cloud_object::{CloudObject, GenericStringObjectFormat, JsonObjectType};
-#[cfg(feature = "local_fs")]
-use crate::code::editor_management::CodeSource;
-use crate::context_chips::prompt::Prompt;
-use crate::context_chips::prompt_type::PromptType;
-use crate::context_chips::ContextChipKind;
-use crate::drive::settings::WarpDriveSettings;
-use crate::drive::sharing::ShareableObject;
-use crate::drive::CloudObjectTypeAndId;
-use crate::env_vars::{
-    env_var_collection_block::{EnvVarCollectionBlock, EnvVarCollectionBlockEvent},
-    CloudEnvVarCollection, EnvVar,
-};
-use crate::pane_group::focus_state::PaneFocusHandle;
-use crate::persistence::{self, FinishedCommandMetadata};
-use crate::server::cloud_objects::update_manager::UpdateManager;
-use crate::server::ids::{ObjectUid, SyncId};
-use crate::server::telemetry::SharingDialogSource;
-#[cfg(feature = "local_fs")]
-use crate::settings::import::model::ImportedConfigModel;
-use crate::settings::import::view::{SettingsImportEvent, SettingsImportView};
-use crate::settings::{
-    AISettings, AISettingsChangedEvent, AliasExpansionSettings, AppEditorSettings,
-    BlockVisibilitySettings, BlockVisibilitySettingsChangedEvent, DebugSettings,
-    DebugSettingsChangedEvent, EmacsBindingsSettings, FontSettings, FontSettingsChangedEvent,
-    InputModeSettings, InputModeSettingsChangedEvent, InputSettings, PaneSettings,
-    PaneSettingsChangedEvent, SelectionSettings, VimBannerSettings,
-};
-use crate::settings_view::flags;
-use crate::settings_view::keybindings::KeybindingChangedNotifier;
-use crate::settings_view::SettingsSection;
-use crate::shell_indicator::ShellIndicatorType;
-use crate::terminal::alias::{check_for_alias_async, AliasedCommand};
-use crate::terminal::alt_screen_reporting::{AltScreenReporting, AltScreenReportingChangedEvent};
-use crate::terminal::block_filter::{
-    filter_button_position_id, BlockFilterEditor, BlockFilterEditorEvent, BlockFilterQuery,
-    OpenedFromClick,
-};
-use crate::terminal::block_list_viewport::OverhangingBlock;
-use crate::terminal::block_list_viewport::ScrollPositionUpdate;
-use crate::terminal::block_list_viewport::ScrollState;
-use crate::terminal::command_corrections_denylist::COMMAND_CORRECTIONS_PREFERRED_DENYLIST;
-use crate::terminal::event::RemoteServerSetupState;
-use crate::terminal::general_settings::GeneralSettings;
-use crate::terminal::grid_size_util::grid_cell_dimensions;
-use crate::terminal::input::decorations::InputBackgroundJobOptions;
-use crate::terminal::input::{CommandExecutionSource, InputAction, InputEmptyStateChangeReason};
-use crate::terminal::ligature_settings::{should_use_ligature_rendering, LigatureSettings};
-#[cfg(feature = "local_tty")]
-use crate::terminal::local_tty::get_shell_starter;
-#[cfg(feature = "local_tty")]
-use crate::terminal::local_tty::shell::ShellStarter;
-#[cfg(all(windows, feature = "local_tty"))]
-use crate::terminal::local_tty::windows::get_user_and_system_env_variable;
-use crate::terminal::model::blockgrid::BlockGrid;
-use crate::terminal::model::session::active_session::ActiveSession;
-use crate::terminal::model::session::{Session, SessionId};
-use crate::terminal::model::{ObfuscateSecrets, RespectObfuscatedSecrets, SecretHandle};
-use crate::terminal::recorder::PtyRecorder;
-use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
-use crate::terminal::session_settings::ToolbarChipSelection;
-use crate::terminal::session_settings::{
-    NotificationsMode, NotificationsSettings, SessionSettings,
-};
-use crate::terminal::session_settings::{
-    SessionSettingsChangedEvent, DEFAULT_THRESHOLD_FOR_LONG_RUNNING_NOTIFICATION,
-};
-use crate::terminal::settings::{TerminalSettings, TerminalSettingsChangedEvent};
-use crate::terminal::shared_session::role_change_modal::{
-    RoleChangeCloseSource, RoleChangeOpenSource,
-};
-use crate::terminal::shared_session::{
-    SharedSessionActionSource, SharedSessionScrollbackType, SharedSessionStatus,
-};
-use crate::terminal::ssh::ssh_detection::SshInteractiveSessionDetected;
-use crate::terminal::view::block_onboarding::onboarding_prompt_block::OnboardingPromptBlock;
-use crate::terminal::warpify::{
-    render::render_subshell_separator, settings::WarpifySettings, SubshellSource,
-};
-use crate::terminal::ShellLaunchData;
-use crate::terminal::{element_size_at_last_frame, HistoryEntry};
-use crate::terminal::{height_in_range_approx, heights_approx_gt, SizeUpdate};
-use crate::terminal::{heights_approx_eq, CellSizeAndWindowPadding};
-use crate::terminal::{AudibleBell, SizeUpdateReason};
-use crate::terminal::{BlockListSettings, BlockListSettingsChangedEvent};
-use crate::themes::theme::WarpTheme;
-use crate::ui_components::icons::{self};
-use crate::util::bindings::{
-    custom_tag_to_keystroke, keybinding_name_to_display_string, keybinding_name_to_keystroke,
-    set_custom_keybinding, CustomAction,
-};
-use crate::util::clipboard::clipboard_content_with_escaped_paths;
-#[cfg(feature = "local_fs")]
-use crate::util::openable_file_type::{is_markdown_file, resolve_file_target, FileTarget};
-use crate::view_components::{DismissibleToast, ToastFlavor};
-use crate::workflows::workflow::Workflow;
-use crate::workflows::WorkflowSelectionSource;
-use crate::workspace::sync_inputs::SyncedInputState;
-use crate::workspace::{CommandSearchOptions, OneTimeModalModel, ToastStack, WorkspaceAction};
-use crate::workspace::{ForkAIConversationParams, ForkFromExchange, ForkedConversationDestination};
-use crate::workspaces::{user_workspaces::UserWorkspaces, workspace::CustomerType};
-use crate::AIRequestUsageModel;
-use crate::ActiveSession as WindowActiveSession;
-use crate::{report_if_error, AIAgentActionResultType};
-use crate::{safe_error, safe_warn};
-
-use async_channel::{Receiver, Sender};
-use base64::Engine as _;
-use chrono::{DateTime, Local, NaiveDateTime};
-use command_corrections::rules::{Rule, RuleId as CommandCorrectionsRuleId};
-use command_corrections::{correct_command, Command, Correction, HistoryItem, SessionMetadata};
-use enclose::enclose;
-use instant::Instant;
-use itertools::Itertools;
-use lazy_static::lazy_static;
-use markdown_parser::FormattedTextFragment;
-use parking_lot::FairMutex;
-use pathfinder_color::ColorU;
-use regex::Regex;
-use serde::Serialize;
-use serde_json::json;
-use session_sharing_protocol::common::{
-    AgentAttachment, ParticipantId, Role, RoleRequestId, RoleRequestResponse,
-    ServerConversationToken as SessionSharingServerConversationToken,
-    WindowSize as SessionSharingWindowSize,
-};
-use shared_session::{
-    cloud_conversation_continuation::CloudConversationContinuationUiState, SharedSessionAdapter,
-    Viewer,
-};
 use std::any::Any;
 use std::borrow::Cow;
 use std::cell::RefCell;
@@ -380,162 +53,125 @@ use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt;
 use std::hash::Hash;
-use std::ops::Range;
+use std::ops::{Deref as _, Range};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::str::FromStr;
-use std::sync::mpsc::SyncSender;
 use std::sync::Arc;
+use std::sync::mpsc::SyncSender;
 use std::thread::JoinHandle;
 use std::time::Duration;
+
+use action::RememberForWarpification;
+pub use action::{AgentOnboardingVersion, OnboardingIntention, OnboardingVersion, TerminalAction};
+use ai::api_keys::{ApiKeyManager, AwsCredentialsState};
+use ai::index::full_source_code_embedding::manager::{BuildSource, CodebaseIndexManager};
+use async_channel::{Receiver, Sender};
+use base64::Engine as _;
+pub use block_banner::{BLOCK_BANNER_HEIGHT, WithinBlockBanner};
+use block_banner::{WarpificationMode, WarpifyBannerState, render_warpification_banner};
+use block_onboarding::onboarding_agentic_suggestions_block::{
+    OnboardingAgenticSuggestionsBlock, OnboardingAgenticSuggestionsBlockEvent, OnboardingChipType,
+};
+use block_onboarding::onboarding_drive_sharing_block::OnboardingDriveSharingBlock;
+use bookmarks::render_floating_block_snapshot;
+use chrono::{DateTime, Local, NaiveDateTime};
+use command_corrections::rules::generic::history::History as CommandCorrectionsHistoryRule;
+use command_corrections::rules::{Rule, RuleId as CommandCorrectionsRuleId};
+use command_corrections::{Command, Correction, HistoryItem, SessionMetadata, correct_command};
+use enclose::enclose;
+pub use init::{
+    CANCEL_COMMAND_KEYBINDING, TOGGLE_AUTOEXECUTE_MODE_KEYBINDING,
+    TOGGLE_HIDE_CLI_RESPONSES_KEYBINDING, TOGGLE_QUEUE_NEXT_PROMPT_KEYBINDING, init,
+};
+use init::{INPUT_BOX_VISIBLE_KEY, TOGGLE_BLOCK_FILTER_KEYBINDING};
+use inline_banner::{
+    AliasExpansionBanner, AliasExpansionBannerAction, AnonymousUserAISignUpBannerState,
+    AnonymousUserLoginBannerAction, AwsBedrockLoginBannerAction, AwsBedrockLoginBannerState,
+    AwsCliNotInstalledBannerAction, AwsCliNotInstalledBannerState, ByoLlmAuthBannerSessionState,
+    OpenInWarpBannerState, SSHBannerAction, SSHBannerState, VimModeBannerAction,
+    render_alias_expansion_banner, render_aws_bedrock_login_banner,
+    render_aws_cli_not_installed_banner, render_inline_notifications_discovery_banner,
+    render_inline_notifications_error_banner, render_inline_shared_session_ended_banner,
+    render_inline_shared_session_started_banner, render_inline_ssh_wrapper_banner,
+    render_open_in_warp_banner, render_shell_process_terminated_banner, render_vim_mode_banner,
+};
+pub use inline_banner::{NotificationsDiscoveryBannerAction, NotificationsErrorBannerAction};
+use instant::Instant;
+use itertools::Itertools;
+use lazy_static::lazy_static;
+use markdown_parser::FormattedTextFragment;
+use parking_lot::FairMutex;
+use pathfinder_color::ColorU;
+use regex::Regex;
+#[cfg(not(target_family = "wasm"))]
+use repo_metadata::repositories::DetectedRepositories;
+use repo_metadata::repositories::RepoDetectionSource;
+use serde::Serialize;
+use serde_json::json;
+use session_sharing_protocol::common::{
+    AgentAttachment, LongRunningCommandAgentInteractionState, ParticipantId, Role, RoleRequestId,
+    RoleRequestResponse, ServerConversationToken as SessionSharingServerConversationToken,
+    WindowSize as SessionSharingWindowSize,
+};
+use session_sharing_protocol::sharer::{RoleUpdateReason, SessionEndedReason, SessionSourceType};
+use settings::{Setting, ToggleableSetting};
+use shared_session::cloud_conversation_continuation::CloudConversationContinuationUiState;
+use shared_session::{SharedSessionAdapter, Viewer};
+use ssh_file_upload::{FileUpload, FileUploadEvent};
 use sum_tree::SeekBias;
+use use_agent_footer::UseAgentToolbar;
+use uuid::Uuid;
 use vec1::vec1;
+use warp_core::channel::ChannelState;
+use warp_core::command::ExitCode;
 use warp_core::context_flag::ContextFlag;
+use warp_core::semantic_selection::SemanticSelection;
 use warp_core::user_preferences::GetUserPreferences as _;
+use warp_util::local_or_remote_path::LocalOrRemotePath;
 #[cfg(feature = "local_fs")]
 use warp_util::path::LineAndColumnArg;
 use warp_util::path::ShellFamily;
+use warpui::accessibility::{AccessibilityContent, ActionAccessibilityContent, WarpA11yRole};
+use warpui::assets::asset_cache::{AssetCache, AssetCacheEvent};
+use warpui::r#async::executor::Background;
+use warpui::r#async::{SpawnedFutureHandle, Timer};
 use warpui::clipboard::ClipboardContent;
+use warpui::clipboard_utils::get_image_filepaths_from_paths;
 use warpui::elements::new_scrollable::{
     AxisConfiguration, ClippedAxisConfiguration, DualAxisConfig, NewScrollableElement,
     ScrollableAppearance, SingleAxisConfig,
 };
+use warpui::elements::shimmering_text::ShimmeringTextStateHandle;
 use warpui::elements::{
-    get_rich_content_position_id, ChildAnchor, ClippedScrollStateHandle, Container,
-    CrossAxisAlignment, DispatchEventResult, DropTarget, DropTargetData, Empty, EventHandler,
-    Expanded, Flex, LiveElement, NewScrollable, OffsetPositioning, ParentAnchor, ParentElement,
-    ParentOffsetBounds, PositionedElementAnchor, PositionedElementOffsetBounds, Radius,
-    ScrollableElement, ScrollbarWidth, Shrinkable, Text,
+    Align, Border, ChildAnchor, ChildView, Clipped, ClippedScrollStateHandle, ConstrainedBox,
+    Container, CornerRadius, CrossAxisAlignment, DispatchEventResult, DropTarget, DropTargetData,
+    Empty, EventHandler, Expanded, Fill, Flex, Hoverable, Icon, LiveElement, MouseStateHandle,
+    NewScrollable, OffsetPositioning, ParentAnchor, ParentElement, ParentOffsetBounds,
+    PositionedElementAnchor, PositionedElementOffsetBounds, Radius, Rect, SavePosition,
+    ScrollStateHandle, Scrollable, ScrollableElement, ScrollbarWidth, Shrinkable, Stack, Text,
+    get_rich_content_position_id,
 };
 use warpui::event::ModifiersState;
+use warpui::fonts::{Cache as FontCache, FamilyId, Properties};
+use warpui::geometry::vector::{Vector2F, vec2f};
+use warpui::image_cache::ImageType;
 use warpui::keymap::Keystroke;
 use warpui::notification::{NotificationSendError, RequestPermissionsOutcome, UserNotification};
 use warpui::platform::{Cursor, OperatingSystem};
-use warpui::r#async::executor::Background;
-use warpui::r#async::{SpawnedFutureHandle, Timer};
-use warpui::windowing::WindowManager;
-
-use warpui::assets::asset_cache::{AssetCache, AssetCacheEvent};
-use warpui::image_cache::ImageType;
-use warpui::units::{IntoLines, IntoPixels, Lines, Pixels};
-use warpui::{
-    accessibility::{AccessibilityContent, ActionAccessibilityContent, WarpA11yRole},
-    elements::SavePosition,
-    elements::{
-        Align, Clipped, ConstrainedBox, CornerRadius, Fill, Hoverable, Icon, MouseStateHandle,
-        Rect, ScrollStateHandle, Scrollable,
-    },
-    fonts::{Cache as FontCache, FamilyId},
-    ui_components::components::UiComponent,
-    AccessibilityData, AppContext, BlurContext, Element, Entity, FocusContext, ModelHandle,
-    TypedActionView, View, ViewAsRef, ViewContext, WeakViewHandle,
-};
-use warpui::{
-    elements::Stack,
-    end_trace_after_next,
-    geometry::vector::{vec2f, Vector2F},
-    record_trace_event, WindowId,
-};
-
-use warpui::{windowing, CursorInfo, EntityId, EventContext, ModelAsRef, SingletonEntity, Tracked};
-
-use crate::ai_assistant::{AskAIType, ASK_AI_ASSISTANT_TEXT};
-use crate::appearance::{Appearance, AppearanceEvent};
-use crate::banner::{
-    Banner, BannerAction, BannerEvent, BannerState, BannerTextButton, BannerTextContent,
-    DismissalType,
-};
-use crate::debounce::debounce;
-use crate::editor::{AutosuggestionType, CrdtOperation, EditorAction};
-use crate::features::FeatureFlag;
-use crate::pane_group::SplitPaneState;
-use crate::pane_group::{
-    CodeReviewPanelArg, PaneConfiguration, PaneEvent, PaneGroupAction, PaneHeaderAction,
-    TerminalViewResources,
-};
-use crate::resource_center::{
-    mark_feature_used_and_write_to_user_defaults, Tip, TipHint, TipsCompleted,
-};
-use crate::server::telemetry::{
-    self, AgentModeAttachContextMethod, AgentModeEntrypoint, AgentModeRewindEntrypoint,
-    AnonymousUserSignupEntrypoint, InteractionSource, LinkOpenMethod, NotificationAgentVariant,
-    PaletteSource, PromptSuggestionViewType, SecretInteraction, SlowBootstrapInfo,
-    ToggleBlockFilterSource, WorkflowTelemetryMetadata,
-};
-use crate::server::{
-    server_api::ServerApi,
-    telemetry::{
-        CommandCorrectionAcceptedType, CommandCorrectionEvent, NotificationsTurnedOnSource,
-        SaveAsWorkflowModalSource, TelemetryEvent,
-    },
-};
-use crate::session_management::{CommandContext, SessionNavigationPromptElements};
-use crate::settings::{PrivacySettings, PrivacySettingsChangedEvent, PrivacySettingsSnapshot};
-use crate::terminal::alt_screen::alt_screen_element::AltScreenElement;
-use crate::terminal::block_list_element::{
-    render_hoverable_block_button, BlockListElement, BlockListMouseStates, BlockSelectAction,
-    BlockTextSelectAction, SnackbarHeaderState, ToolbeltButtonTooltip,
-};
-use crate::terminal::block_list_viewport::AutoscrollBehavior;
-use crate::terminal::block_list_viewport::{InputMode, ScrollPosition, ViewportState};
-use crate::terminal::bootstrap::init_subshell_command;
-use crate::terminal::event::TerminalMode;
-use crate::terminal::event::UserBlockCompleted;
-use crate::terminal::find::{BlockGridMatch, BlockListMatch, TerminalFindModel};
-use crate::terminal::input::{InputState, MenuPositioning, MenuPositioningProvider};
-use crate::terminal::keys::TerminalKeybindings;
-use crate::terminal::model::block::{AgentInteractionMetadata, BlockMetadata};
-use crate::terminal::model::block::{Block, BlockId};
-use crate::terminal::model::blocks::{BlockFilter, BlockList};
-use crate::terminal::model::blocks::{BlockHeight, BlockHeightItem, BlockHeightSummary, Gap};
-use crate::terminal::model::escape_sequences::{self, EscCodes, ToEscapeSequence, C1};
-use crate::terminal::model::grid::grid_handler::{FragmentBoundary, TermMode};
-use crate::terminal::model::index::{Point, Side};
-use crate::terminal::model::mouse::MouseState;
-use crate::terminal::model::selection::{SelectAction, SelectionDirection};
-use crate::terminal::model::session::{BootstrapSessionType, SessionType, Sessions, SessionsEvent};
-use crate::terminal::model::terminal_model::{BlockIndex, TerminalInputState};
-use crate::terminal::model::terminal_model::{
-    BlockSelectionCardinality, SelectedBlocks, WithinModel,
-};
-use crate::terminal::model::{
-    ansi::{ClearMode, Handler},
-    blocks::BlockListPoint,
-};
-use crate::terminal::view::inline_banner::{
-    render_agent_mode_setup_banner, AgentModeSetupSpeedbumpBannerAction,
-    AgentModeSetupSpeedbumpBannerState, AliasExpansionBannerState,
-    NotificationsDiscoveryBannerState, NotificationsErrorBannerState, PromptSuggestionBannerState,
-    VimModeBannerState,
-};
-use crate::terminal::view::ssh_file_upload::FileUploadId;
-use crate::terminal::waterfall_gap_element::WaterfallGapElement;
-use crate::terminal::ShellHost;
-use crate::terminal::{
-    block_list_element::BlockHoverAction,
-    // find::{Event as FindEvent, Find, FindDirection},
-    input::{Event as InputEvent, Input, INPUT_A11Y_HELPER, INPUT_A11Y_LABEL},
-    model::block::SerializedBlock,
-    shell::ShellType,
-    terminal_size_element::TerminalSizeElement,
-    TerminalModel,
-};
-use crate::view_components::find::{Event as FindEvent, Find, FindDirection, FindWithinBlockState};
-use settings::{Setting, ToggleableSetting};
-use warp_core::semantic_selection::SemanticSelection;
 use warpui::text::SelectionType;
-
-use crate::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields};
-use crate::server::telemetry::{BlockLatencyInfo, BootstrappingInfo};
-use crate::terminal::{block_list_element::BlockListMenuSource, prompt};
-use crate::terminal::{color, History, SizeInfo};
-use crate::terminal::{color::List, model::block::LONG_RUNNING_BOTTOM_PADDING_LINES};
-use crate::terminal::{event::AfterBlockCompletedEvent, event::BlockLatencyData, event::BlockType};
-use crate::throttle::throttle;
-use crate::util::color::darken;
-use crate::{send_telemetry_from_ctx, send_telemetry_on_executor, send_telemetry_sync_from_ctx};
+use warpui::ui_components::components::UiComponent;
+use warpui::units::{IntoLines, IntoPixels, Lines, Pixels};
+use warpui::windowing::WindowManager;
+use warpui::{
+    AccessibilityData, AppContext, BlurContext, CursorInfo, Element, Entity, EntityId,
+    EventContext, FocusContext, ModelAsRef, ModelHandle, SingletonEntity, Tracked, TypedActionView,
+    View, ViewAsRef, ViewContext, ViewHandle, WeakModelHandle, WeakViewHandle, WindowId,
+    end_trace_after_next, record_trace_event, windowing,
+};
 
 use self::link_detection::HighlightedLinkOption;
+pub use self::link_detection::{GridHighlightedLink, RichContentLink, RichContentLinkTooltipInfo};
 use super::available_shells::AvailableShell;
 use super::block_list_viewport::FindMatchScrollLocation;
 use super::event::SshLoginStatus;
@@ -551,46 +187,360 @@ use super::model::secrets::RichContentSecretTooltipInfo;
 use super::model::selection::ExpandedSelectionRange;
 use super::model::session::SessionBootstrappedEvent;
 use super::settings::AltScreenPaddingMode;
-use super::ssh::error::{SshErrorBlock, SshErrorBlockEvent, SSH_ERROR_BLOCK_VISIBLE_KEY};
+use super::ssh::SSH_WARPIFY_TIMEOUT_DURATION;
+use super::ssh::error::{SSH_ERROR_BLOCK_VISIBLE_KEY, SshErrorBlock, SshErrorBlockEvent};
 use super::ssh::install_tmux::{
-    install_root_tmux_script, install_tmux_script, SshInstallTmuxBlock, SshInstallTmuxBlockEvent,
-    SshKeyEvent, TmuxInstallMethod,
+    SshInstallTmuxBlock, SshInstallTmuxBlockEvent, SshKeyEvent, TmuxInstallMethod,
+    install_root_tmux_script, install_tmux_script,
 };
 use super::ssh::root_access::RootAccess;
 use super::ssh::ssh_detection::evaluate_warpify_ssh_host;
 use super::ssh::util::{
-    convert_script_to_one_line, parse_interactive_ssh_command, InteractiveSshCommand,
-    SshWarpifyCommand,
+    InteractiveSshCommand, SshWarpifyCommand, convert_script_to_one_line,
+    parse_interactive_ssh_command,
 };
 use super::ssh::warpify::{
-    begin_warpify_ssh_session_command, warpify_ssh_session_command, SshWarpifyBlock,
-    SshWarpifyBlockEvent,
+    SshWarpifyBlock, SshWarpifyBlockEvent, begin_warpify_ssh_session_command,
+    warpify_ssh_session_command,
 };
-use super::ssh::SSH_WARPIFY_TIMEOUT_DURATION;
+use super::warpify::WarpificationSource;
 use super::warpify::success_block::{WarpifySuccessBlock, WarpifySuccessBlockEvent};
 use super::warpify::trigger_state::{SshBlockState, WarpifyState};
-use super::warpify::WarpificationSource;
-use super::{GridType, HistoryEvent};
-use crate::antivirus::AntivirusInfo;
-use crate::terminal::links::should_directly_open_link;
-use crate::terminal::model_events::{AnsiHandlerEvent, ModelEvent, ModelEventDispatcher};
-use action::RememberForWarpification;
-use block_banner::{render_warpification_banner, WarpificationMode, WarpifyBannerState};
-use bookmarks::render_floating_block_snapshot;
-use command_corrections::rules::generic::history::History as CommandCorrectionsHistoryRule;
-use init::{INPUT_BOX_VISIBLE_KEY, TOGGLE_BLOCK_FILTER_KEYBINDING};
-use inline_banner::{
-    render_alias_expansion_banner, render_aws_bedrock_login_banner,
-    render_aws_cli_not_installed_banner, render_inline_notifications_discovery_banner,
-    render_inline_notifications_error_banner, render_inline_shared_session_ended_banner,
-    render_inline_shared_session_started_banner, render_inline_ssh_wrapper_banner,
-    render_open_in_warp_banner, render_shell_process_terminated_banner, render_vim_mode_banner,
-    AliasExpansionBanner, AliasExpansionBannerAction, AnonymousUserAISignUpBannerState,
-    AnonymousUserLoginBannerAction, AwsBedrockLoginBannerAction, AwsBedrockLoginBannerState,
-    AwsCliNotInstalledBannerAction, AwsCliNotInstalledBannerState, ByoLlmAuthBannerSessionState,
-    OpenInWarpBannerState, SSHBannerAction, SSHBannerState, VimModeBannerAction,
+use super::{CLIAgent, GridType, HistoryEvent, cli_agent};
+#[cfg(any(test, feature = "integration_tests"))]
+use crate::ai::agent::UserQueryMode;
+use crate::ai::agent::api::ServerConversationToken;
+use crate::ai::agent::conversation::{AIConversation, AIConversationId, ConversationStatus};
+use crate::ai::agent::redaction::redact_secrets;
+use crate::ai::agent::todos::popup::{AgentTodosPopupEvent, AgentTodosPopupView};
+use crate::ai::agent::{
+    AIAgentActionId, AIAgentActionType, AIAgentCitation, AIAgentContext, AIAgentExchangeId,
+    AIAgentInput, AIAgentOutputStatus, AIAgentPtyWriteMode, AIAgentTextSection,
+    AgentReviewCommentBatch, CancellationReason, EntrypointType, FileLocations,
+    FinishedAIAgentOutput, PassiveCodeDiffEntry, PassiveSuggestionResultType,
+    PassiveSuggestionTrigger, RenderableAIError, ServerOutputId, ShellCommandCompletedTrigger,
+    StaticQueryType,
 };
-use warp_core::command::ExitCode;
+#[cfg(feature = "local_fs")]
+use crate::ai::agent::{CurrentHead, DiffBase};
+use crate::ai::agent_conversations_model::{AgentConversationsModel, AgentConversationsModelEvent};
+use crate::ai::ambient_agents::{
+    AmbientAgentTaskId, AmbientConversationStatus, conversation_output_status_from_conversation,
+};
+use crate::ai::blocklist::PendingAttachment;
+use crate::ai::blocklist::agent_view::agent_input_footer::toolbar_item::AgentToolbarItemKind;
+use crate::ai::blocklist::agent_view::{
+    AgentViewController, AgentViewControllerEvent, AgentViewDisplayMode, AgentViewEntryBlockParams,
+    AgentViewEntryOrigin, AgentViewHeaderDisabledTheme, AgentViewHeaderTheme,
+    AgentViewZeroStateBlock, AgentViewZeroStateEvent, ENTER_OR_EXIT_CONFIRMATION_WINDOW,
+    EphemeralMessageModel, ExitConfirmationTrigger, InlineAgentViewHeader, OrchestrationPillBar,
+    agent_view_bg_fill, fork_from_last_known_good_state_exchange_id,
+    get_agent_view_entry_block_position_id,
+};
+use crate::ai::blocklist::block::cli::{CLISubagentView, CLISubagentViewEvent};
+use crate::ai::blocklist::block::cli_controller::{
+    CLISubagentController, CLISubagentEvent, UserTakeOverReason,
+};
+use crate::ai::blocklist::block::status_bar::BlocklistAIStatusBarEvent;
+use crate::ai::blocklist::block::{AIBlockAction, FinishReason};
+use crate::ai::blocklist::codebase_index_speedbump_banner::{
+    CodebaseIndexSpeedbumpBannerAction, CodebaseIndexSpeedbumpBannerState, VisibilityState,
+};
+use crate::ai::blocklist::inline_action::code_diff_view::{CodeDiffView, FileDiff};
+use crate::ai::blocklist::model::{
+    AIBlockModel, AIBlockModelHelper, AIBlockModelImpl, AIBlockOutputStatus,
+};
+use crate::ai::blocklist::suggested_agent_mode_workflow_modal::SuggestedAgentModeWorkflowAndId;
+use crate::ai::blocklist::suggested_rule_modal::SuggestedRuleAndId;
+use crate::ai::blocklist::summarization_cancel_dialog::SummarizationCancelDialog;
+use crate::ai::blocklist::telemetry_banner::{TelemetryBanner, should_collect_ai_ugc_telemetry};
+use crate::ai::blocklist::usage::conversation_usage_view::{
+    ConversationUsageInfo, ConversationUsageView, TimingInfo,
+};
+use crate::ai::blocklist::{
+    AIBlock, AIBlockEvent, ATTACH_AS_AGENT_MODE_CONTEXT_TEXT, BlocklistAIActionEvent,
+    BlocklistAIActionModel, BlocklistAIContextEvent, BlocklistAIContextModel,
+    BlocklistAIController, BlocklistAIControllerEvent, BlocklistAIHistoryEvent,
+    BlocklistAIHistoryModel, BlocklistAIInputEvent, BlocklistAIInputModel, ClientIdentifiers,
+    ConversationStatusUpdate, InputConfig, InputType, LegacyPassiveSuggestionsEvent,
+    LegacyPassiveSuggestionsModel, MaaPassiveSuggestionsEvent, MaaPassiveSuggestionsModel,
+    PRE_REWIND_PREFIX, PassiveSuggestionsModels, PendingQueryState, RequestFileEditsFormatKind,
+    ShellCommandExecutor, ShellCommandExecutorEvent, SlashCommandRequest, StartAgentExecutor,
+    StartAgentExecutorEvent, StartAgentRequest, ai_brand_color, block_context_from_terminal_model,
+    get_ai_block_overflow_menu_element_position_id, get_attached_blocks_chip_element_position_id,
+};
+use crate::ai::conversation_utils;
+use crate::ai::document::ai_document_model::{AIDocumentId, AIDocumentModel, AIDocumentVersion};
+use crate::ai::execution_profiles::profiles::{AIExecutionProfilesModel, ClientProfileId};
+use crate::ai::get_relevant_files::controller::GetRelevantFilesController;
+use crate::ai::llms::{LLMId, LLMModelHost, LLMPreferences};
+use crate::ai::loading::shimmering_warp_loading_text;
+#[cfg(feature = "local_fs")]
+use crate::ai::persisted_workspace::PersistedWorkspace;
+use crate::ai::predict::prompt_suggestions::{
+    has_pending_code_or_unit_test_prompt_suggestion,
+    is_accept_prompt_suggestion_bound_to_cmd_enter,
+    is_accept_prompt_suggestion_bound_to_ctrl_enter,
+};
+use crate::ai_assistant::{ASK_AI_ASSISTANT_TEXT, AskAIType};
+use crate::antivirus::AntivirusInfo;
+use crate::appearance::{Appearance, AppearanceEvent};
+use crate::auth::auth_manager::AuthManager;
+use crate::auth::auth_state::AuthState;
+use crate::auth::auth_view_modal::AuthViewVariant;
+use crate::auth::{AuthStateProvider, UserUid};
+use crate::autoupdate::{self, AutoupdateStage, get_update_state};
+use crate::banner::{
+    Banner, BannerAction, BannerEvent, BannerState, BannerTextButton, BannerTextContent,
+    DismissalType,
+};
+use crate::cloud_object::model::actions::ObjectActionType;
+use crate::cloud_object::model::persistence::CloudModel;
+use crate::cloud_object::{CloudObject, GenericStringObjectFormat, JsonObjectType};
+#[cfg(feature = "local_fs")]
+use crate::code::editor_management::CodeSource;
+#[cfg(feature = "local_fs")]
+use crate::code_review::DiffSetScope;
+use crate::code_review::comments::{
+    AttachedReviewComment, PendingImportedReviewComment, convert_insert_review_comments,
+};
+#[cfg(feature = "local_fs")]
+use crate::code_review::context::{
+    convert_file_diffs_to_diffset_hunks, create_attachment_reference_and_key,
+    register_diffset_attachment,
+};
+#[cfg(feature = "local_fs")]
+use crate::code_review::diff_state::LocalDiffStateModel;
+use crate::code_review::diff_state::{DiffMode, GitDeltaPreference};
+#[cfg(feature = "local_fs")]
+use crate::code_review::git_status_update::{
+    GitRepoStatusModel, GitStatusMetadata, GitStatusUpdateModel,
+};
+use crate::code_review::telemetry_event::CodeReviewPaneEntrypoint;
+use crate::context_chips::ContextChipKind;
+use crate::context_chips::prompt::Prompt;
+use crate::context_chips::prompt_type::PromptType;
+use crate::debounce::debounce;
+use crate::drive::CloudObjectTypeAndId;
+use crate::drive::settings::WarpDriveSettings;
+use crate::drive::sharing::ShareableObject;
+use crate::editor::{AutosuggestionType, CrdtOperation, EditorAction};
+use crate::env_vars::env_var_collection_block::{
+    EnvVarCollectionBlock, EnvVarCollectionBlockEvent,
+};
+use crate::env_vars::{CloudEnvVarCollection, EnvVar};
+use crate::features::FeatureFlag;
+use crate::menu::{Event as MenuEvent, Menu, MenuItem, MenuItemFields};
+use crate::pane_group::focus_state::PaneFocusHandle;
+use crate::pane_group::{
+    CodeReviewPanelArg, PaneConfiguration, PaneEvent, PaneGroupAction, PaneHeaderAction,
+    SplitPaneState, TerminalViewResources,
+};
+use crate::persistence::{self, FinishedCommandMetadata};
+use crate::projects::ProjectManagementModel;
+use crate::remote_server::manager::{
+    RemoteServerInitPhase, RemoteServerManager, RemoteServerManagerEvent,
+};
+use crate::resource_center::{
+    Tip, TipHint, TipsCompleted, mark_feature_used_and_write_to_user_defaults,
+};
+use crate::search::slash_command_menu::static_commands::commands;
+use crate::server::cloud_objects::update_manager::UpdateManager;
+use crate::server::ids::{ObjectUid, SyncId};
+use crate::server::server_api::ServerApi;
+use crate::server::telemetry::{
+    self, AgentModeAttachContextMethod, AgentModeEntrypoint, AgentModeRewindEntrypoint,
+    AnonymousUserSignupEntrypoint, BlockLatencyInfo, BootstrappingInfo,
+    CommandCorrectionAcceptedType, CommandCorrectionEvent, InteractionSource, LinkOpenMethod,
+    NotificationAgentVariant, NotificationsTurnedOnSource, PaletteSource, PromptSuggestionViewType,
+    SaveAsWorkflowModalSource, SecretInteraction, SharingDialogSource, SlowBootstrapInfo,
+    TelemetryEvent, ToggleBlockFilterSource, WorkflowTelemetryMetadata,
+};
+use crate::session_management::{CommandContext, SessionNavigationPromptElements};
+use crate::settings::ai::FocusedTerminalInfo;
+#[cfg(feature = "local_fs")]
+use crate::settings::import::model::ImportedConfigModel;
+use crate::settings::import::view::{SettingsImportEvent, SettingsImportView};
+use crate::settings::{
+    AISettings, AISettingsChangedEvent, AliasExpansionSettings, AppEditorSettings,
+    BlockVisibilitySettings, BlockVisibilitySettingsChangedEvent, CodeSettings, DebugSettings,
+    DebugSettingsChangedEvent, EmacsBindingsSettings, FontSettings, FontSettingsChangedEvent,
+    InputModeSettings, InputModeSettingsChangedEvent, InputSettings, PaneSettings,
+    PaneSettingsChangedEvent, PrivacySettings, PrivacySettingsChangedEvent,
+    PrivacySettingsSnapshot, SelectionSettings, VimBannerSettings,
+};
+use crate::settings_view::keybindings::KeybindingChangedNotifier;
+use crate::settings_view::mcp_servers_page::MCPServersSettingsPage;
+use crate::settings_view::{SettingsSection, flags};
+use crate::shell_indicator::ShellIndicatorType;
+use crate::terminal::alias::{AliasedCommand, check_for_alias_async};
+use crate::terminal::alt_screen::alt_screen_element::AltScreenElement;
+use crate::terminal::alt_screen_reporting::{AltScreenReporting, AltScreenReportingChangedEvent};
+use crate::terminal::block_filter::{
+    BlockFilterEditor, BlockFilterEditorEvent, BlockFilterQuery, OpenedFromClick,
+    filter_button_position_id,
+};
+use crate::terminal::block_list_element::{
+    BlockListElement, BlockListMenuSource, BlockListMouseStates, BlockSelectAction,
+    BlockTextSelectAction, SnackbarHeaderState, ToolbeltButtonTooltip,
+    render_hoverable_block_button,
+};
+use crate::terminal::block_list_viewport::{
+    AutoscrollBehavior, InputMode, OverhangingBlock, ScrollPosition, ScrollPositionUpdate,
+    ScrollState, ViewportState,
+};
+use crate::terminal::bootstrap::init_subshell_command;
+use crate::terminal::cli_agent_sessions::event::{
+    CLI_AGENT_NOTIFICATION_SENTINEL, CLIAgentEvent, CLIAgentEventPayload, CLIAgentEventType,
+    parse_event,
+};
+use crate::terminal::cli_agent_sessions::listener::{
+    CLIAgentSessionListener, agent_supports_rich_status, is_agent_supported,
+};
+#[cfg(not(target_family = "wasm"))]
+use crate::terminal::cli_agent_sessions::plugin_manager::{PluginModalKind, plugin_manager_for};
+use crate::terminal::cli_agent_sessions::{
+    CLIAgentInputEntrypoint, CLIAgentInputState, CLIAgentRichInputCloseReason, CLIAgentSession,
+    CLIAgentSessionContext, CLIAgentSessionStatus, CLIAgentSessionsModel,
+    CLIAgentSessionsModelEvent,
+};
+use crate::terminal::color::List;
+use crate::terminal::command_corrections_denylist::COMMAND_CORRECTIONS_PREFERRED_DENYLIST;
+use crate::terminal::event::{
+    AfterBlockCompletedEvent, BlockLatencyData, BlockType, RemoteServerSetupState, TerminalMode,
+    UserBlockCompleted,
+};
+use crate::terminal::find::{BlockGridMatch, BlockListMatch, TerminalFindModel};
+use crate::terminal::general_settings::GeneralSettings;
+use crate::terminal::grid_size_util::grid_cell_dimensions;
+use crate::terminal::input::decorations::InputBackgroundJobOptions;
+use crate::terminal::input::inline_menu::InlineMenuPositioner;
+use crate::terminal::input::{
+    CommandExecutionSource, InputAction, InputEmptyStateChangeReason, InputState, MenuPositioning,
+    MenuPositioningProvider,
+};
+use crate::terminal::keys::TerminalKeybindings;
+use crate::terminal::ligature_settings::{LigatureSettings, should_use_ligature_rendering};
+use crate::terminal::links::should_directly_open_link;
+#[cfg(feature = "local_tty")]
+use crate::terminal::local_tty::get_shell_starter;
+#[cfg(feature = "local_tty")]
+use crate::terminal::local_tty::shell::ShellStarter;
+#[cfg(all(windows, feature = "local_tty"))]
+use crate::terminal::local_tty::windows::get_user_and_system_env_variable;
+use crate::terminal::model::ansi::{ClearMode, Handler};
+use crate::terminal::model::block::{
+    AgentInteractionMetadata, Block, BlockId, BlockMetadata, LONG_RUNNING_BOTTOM_PADDING_LINES,
+};
+use crate::terminal::model::blockgrid::BlockGrid;
+use crate::terminal::model::blocks::{
+    BlockFilter, BlockHeight, BlockHeightItem, BlockHeightSummary, BlockList, BlockListPoint, Gap,
+    RemovableBlocklistItem,
+};
+use crate::terminal::model::escape_sequences::{self, C1, EscCodes, ToEscapeSequence};
+use crate::terminal::model::grid::grid_handler::{FragmentBoundary, TermMode};
+use crate::terminal::model::index::{Point, Side};
+use crate::terminal::model::mouse::MouseState;
+use crate::terminal::model::selection::{SelectAction, SelectionDirection};
+use crate::terminal::model::session::active_session::ActiveSession;
+use crate::terminal::model::session::{
+    BootstrapSessionType, Session, SessionId, SessionType, Sessions, SessionsEvent,
+};
+use crate::terminal::model::terminal_model::{
+    BlockIndex, BlockSelectionCardinality, SelectedBlocks, TerminalInputState, WithinModel,
+};
+use crate::terminal::model::{ObfuscateSecrets, RespectObfuscatedSecrets, SecretHandle};
+use crate::terminal::model_events::{AnsiHandlerEvent, ModelEvent, ModelEventDispatcher};
+use crate::terminal::recorder::PtyRecorder;
+use crate::terminal::safe_mode_settings::get_secret_obfuscation_mode;
+use crate::terminal::session_settings::{
+    DEFAULT_THRESHOLD_FOR_LONG_RUNNING_NOTIFICATION, NotificationsMode, NotificationsSettings,
+    SessionSettings, SessionSettingsChangedEvent, ToolbarChipSelection,
+};
+use crate::terminal::settings::{TerminalSettings, TerminalSettingsChangedEvent};
+use crate::terminal::shared_session::role_change_modal::{
+    RoleChangeCloseSource, RoleChangeOpenSource,
+};
+use crate::terminal::shared_session::{
+    SharedSessionActionSource, SharedSessionScrollbackType, SharedSessionStatus,
+};
+use crate::terminal::ssh::ssh_detection::SshInteractiveSessionDetected;
+use crate::terminal::view::block_onboarding::onboarding_prompt_block::OnboardingPromptBlock;
+use crate::terminal::view::init_environment::mode_selector::{
+    EnvironmentSetupMode, EnvironmentSetupModeSelector, EnvironmentSetupModeSelectorEvent,
+};
+use crate::terminal::view::init_environment::{InitEnvironmentBlock, InitEnvironmentBlockEvent};
+use crate::terminal::view::inline_banner::{
+    AgentModeSetupSpeedbumpBannerAction, AgentModeSetupSpeedbumpBannerState,
+    AliasExpansionBannerState, NotificationsDiscoveryBannerState, NotificationsErrorBannerState,
+    PromptSuggestionBannerState, VimModeBannerState, render_agent_mode_setup_banner,
+};
+use crate::terminal::view::passive_suggestions::PromptSuggestionResolution;
+pub use crate::terminal::view::rich_content::{
+    AIBlockMetadata, AgentViewEntryMetadata, RichContent, RichContentInsertionPosition,
+    RichContentMetadata,
+};
+use crate::terminal::view::ssh_file_upload::FileUploadId;
+use crate::terminal::view::ssh_remote_server_choice_view::{
+    SshRemoteServerChoiceView, SshRemoteServerChoiceViewEvent,
+};
+use crate::terminal::view::ssh_remote_server_failed_banner::{
+    SshRemoteServerFailedBanner, SshRemoteServerFailedBannerEvent,
+};
+use crate::terminal::view::telemetry::PromptSuggestionFallbackReason;
+use crate::terminal::view::zero_state_block::TerminalViewZeroStateBlock;
+use crate::terminal::warpify::SubshellSource;
+use crate::terminal::warpify::render::render_subshell_separator;
+use crate::terminal::warpify::settings::WarpifySettings;
+use crate::terminal::waterfall_gap_element::WaterfallGapElement;
+use crate::terminal::{
+    AudibleBell, BlockListSettings, BlockListSettingsChangedEvent, CellSizeAndWindowPadding,
+    History, HistoryEntry, ShellHost, ShellLaunchData, SizeInfo, SizeUpdate, SizeUpdateReason,
+    color, element_size_at_last_frame, height_in_range_approx, heights_approx_eq,
+    heights_approx_gt, prompt,
+};
+use crate::terminal::{
+    TerminalModel,
+    block_list_element::BlockHoverAction,
+    // find::{Event as FindEvent, Find, FindDirection},
+    input::{Event as InputEvent, INPUT_A11Y_HELPER, INPUT_A11Y_LABEL, Input},
+    model::block::SerializedBlock,
+    shell::ShellType,
+    terminal_size_element::TerminalSizeElement,
+};
+use crate::themes::theme::WarpTheme;
+use crate::throttle::throttle;
+use crate::ui_components::icons::{self};
+use crate::util::bindings::{
+    CustomAction, custom_tag_to_keystroke, keybinding_name_to_display_string,
+    keybinding_name_to_keystroke, set_custom_keybinding,
+};
+use crate::util::clipboard::clipboard_content_with_escaped_paths;
+use crate::util::color::darken;
+#[cfg(feature = "local_fs")]
+use crate::util::file::external_editor::{EditorSettings, settings::EditorLayout};
+#[cfg(feature = "local_fs")]
+use crate::util::openable_file_type::{FileTarget, is_markdown_file, resolve_file_target};
+use crate::util::repo_detection::{RepoDetectionSessionType, detect_possible_git_repo};
+use crate::util::truncation::truncate_from_end;
+use crate::view_components::action_button::{ActionButton, ButtonSize, KeystrokeSource};
+use crate::view_components::find::{Event as FindEvent, Find, FindDirection, FindWithinBlockState};
+use crate::view_components::{DismissibleToast, ToastFlavor};
+use crate::workflows::WorkflowSelectionSource;
+use crate::workflows::workflow::Workflow;
+use crate::workspace::sync_inputs::SyncedInputState;
+use crate::workspace::view::cloud_agent_capacity_modal::CloudAgentCapacityModalVariant;
+use crate::workspace::{
+    CommandSearchOptions, ForkAIConversationParams, ForkFromExchange,
+    ForkedConversationDestination, OneTimeModalModel, ToastStack, WorkspaceAction,
+};
+use crate::workspaces::user_workspaces::{UserWorkspaces, UserWorkspacesEvent};
+use crate::workspaces::workspace::CustomerType;
+use crate::{
+    AIAgentActionResultType, AIRequestUsageModel, ActiveSession as WindowActiveSession,
+    report_if_error, safe_error, safe_warn, send_telemetry_from_ctx, send_telemetry_on_executor,
+    send_telemetry_sync_from_ctx,
+};
 
 lazy_static! {
     // A set of commands that perform minimal work that we use as a baseline to measure the latency of blocks.
@@ -2948,6 +2898,23 @@ pub struct BlockSelectionDetails {
     is_shift_down: bool,
 }
 
+/// Why `apply_block_metadata_update` is being invoked. The two sources have
+/// different cardinalities — precmd fires exactly once per block, whereas OSC 7
+/// can fire many times mid-block from chatty prompts. Once-per-block work
+/// (git-repo detection on unchanged CWDs, `block_completed_callbacks` drain)
+/// must be gated on this distinction.
+#[derive(Copy, Clone, Debug)]
+enum BlockMetadataUpdateSource {
+    /// `Event::BlockMetadataReceived` — the shell's precmd hook fired between
+    /// blocks. Run all once-per-block work.
+    Precmd,
+    /// `Event::BlockWorkingDirectoryUpdated` — the running command emitted an
+    /// OSC 7 sequence (`\e]7;file://host/path\a`). Skip repo detection unless
+    /// the CWD actually changed, and never run block-completion callbacks
+    /// (the block hasn't completed).
+    Osc7,
+}
+
 impl TerminalView {
     /// Returns the path to the current repository, if any.
     pub fn current_repo_path(&self) -> Option<&LocalOrRemotePath> {
@@ -3872,7 +3839,7 @@ impl TerminalView {
             Banner::new(BannerTextContent::formatted_text(vec![
                 FormattedTextFragment::plain_text("Seems like your completions are not working ("),
                 FormattedTextFragment::hyperlink("more info", CONTROLMASTER_ISSUES_URL),
-                FormattedTextFragment::plain_text("). Enabling tmux warpification in "),
+                FormattedTextFragment::plain_text("). Enabling the SSH extension in "),
                 FormattedTextFragment::hyperlink_action(
                     "settings",
                     TerminalAction::ShowWarpifySettings,
@@ -4392,6 +4359,7 @@ impl TerminalView {
                                 remote_arch,
                                 exit_code: None,
                                 signal_killed: None,
+                                proxy_stderr: None,
                             },
                             ctx
                         );
@@ -4401,6 +4369,7 @@ impl TerminalView {
                         phase,
                         error,
                         exit_status,
+                        proxy_stderr,
                         is_cancelled,
                     } => {
                         me.model.lock().event_proxy.send_terminal_event(
@@ -4429,6 +4398,7 @@ impl TerminalView {
                                     remote_arch,
                                     exit_code: exit_status.as_ref().and_then(|s| s.code),
                                     signal_killed: exit_status.as_ref().map(|s| s.signal_killed),
+                                    proxy_stderr: proxy_stderr.clone(),
                                 },
                                 ctx
                             );
@@ -4661,6 +4631,7 @@ impl TerminalView {
                     | RemoteServerManagerEvent::RepoMetadataDirectoryLoaded { .. }
                     | RemoteServerManagerEvent::CodebaseIndexStatusesSnapshot { .. }
                     | RemoteServerManagerEvent::CodebaseIndexStatusUpdated { .. }
+                    | RemoteServerManagerEvent::CodebaseIndexMutationFailed { .. }
                     | RemoteServerManagerEvent::BufferUpdated { .. }
                     | RemoteServerManagerEvent::BufferConflictDetected { .. }
                     | RemoteServerManagerEvent::DiffStateSnapshotReceived { .. }
@@ -8677,13 +8648,6 @@ impl TerminalView {
         // probably won't happen often, but it's something that we might want to clean
         // up eventually.
         if self.control_master_error_banner_state.associated_session_id != active_session_id {
-            self.control_master_error_banner_state = ControlMasterErrorBannerState {
-                is_open: true,
-                associated_session_id: active_session_id,
-            };
-
-            ctx.notify();
-
             let has_remote_server = active_session_id.is_some_and(|session_id| {
                 self.sessions
                     .as_ref(ctx)
@@ -8698,6 +8662,16 @@ impl TerminalView {
                         )
                     })
             });
+
+            // Don't show the banner when the session already has a remote server
+            // active — the CTA to enable the SSH extension is irrelevant.
+            self.control_master_error_banner_state = ControlMasterErrorBannerState {
+                is_open: !has_remote_server,
+                associated_session_id: active_session_id,
+            };
+
+            ctx.notify();
+
             send_telemetry_from_ctx!(
                 TelemetryEvent::SSHControlMasterError { has_remote_server },
                 ctx
@@ -9820,9 +9794,11 @@ impl TerminalView {
         }
         self.remove_vim_mode_banner(ctx);
         VimBannerSettings::handle(ctx).update(ctx, |banner_settings, model_ctx| {
-            report_if_error!(banner_settings
-                .vim_keybindings_banner_state
-                .set_value(BannerState::Dismissed, model_ctx));
+            report_if_error!(
+                banner_settings
+                    .vim_keybindings_banner_state
+                    .set_value(BannerState::Dismissed, model_ctx)
+            );
         });
     }
 
@@ -10118,9 +10094,11 @@ impl TerminalView {
             }
             AwsBedrockLoginBannerAction::DontShowAgain => {
                 AISettings::handle(ctx).update(ctx, |ai_settings, ctx| {
-                    report_if_error!(ai_settings
-                        .aws_bedrock_login_banner_dismissed
-                        .set_value(true, ctx));
+                    report_if_error!(
+                        ai_settings
+                            .aws_bedrock_login_banner_dismissed
+                            .set_value(true, ctx)
+                    );
                 });
             }
             AwsBedrockLoginBannerAction::Dismiss => {
@@ -10850,6 +10828,262 @@ impl TerminalView {
             button.set_label(label, ctx);
             button.set_disabled(disabled_reason.is_some(), ctx);
             button.set_tooltip(disabled_reason, ctx);
+        });
+    }
+
+    /// Apply a block metadata update from either the precmd hook
+    /// ([`Event::BlockMetadataReceived`]) or an OSC 7 sequence emitted
+    /// mid-block ([`Event::BlockWorkingDirectoryUpdated`]). The `source`
+    /// controls work that's safe to do once per block but wrong to do
+    /// repeatedly mid-block — see [`BlockMetadataUpdateSource`].
+    fn apply_block_metadata_update(
+        &mut self,
+        block_metadata: &BlockMetadata,
+        is_after_in_band_command: bool,
+        is_done_bootstrapping: bool,
+        source: BlockMetadataUpdateSource,
+        ctx: &mut ViewContext<Self>,
+    ) {
+        // In-band commands don't change the CWD, git state, or session
+        // metadata. Skip the expensive processing (git repo detection,
+        // directory indexing, re-renders) to avoid an infinite loop where
+        // a re-render triggers completions which fire another in-band
+        // command. See also the complementary guard in
+        // Input::set_active_block_metadata.
+        if is_after_in_band_command {
+            self.active_block_metadata = Some(block_metadata.clone());
+            self.input.update(ctx, |view, ctx| {
+                view.set_active_block_metadata(
+                    block_metadata.clone(),
+                    true, // is_after_in_band_command
+                    ctx,
+                );
+            });
+            return;
+        }
+
+        if let Some(prev_block_metadata) = self.active_block_metadata.take() {
+            // Only send event to save app state when the block is post bootstrap
+            // and working directory has changed.
+            if prev_block_metadata.current_working_directory()
+                != block_metadata.current_working_directory()
+                && is_done_bootstrapping
+            {
+                ctx.emit(Event::AppStateChanged);
+            }
+
+            // Update the shell launch data for the active session.
+            if prev_block_metadata.session_id() != block_metadata.session_id()
+                && is_done_bootstrapping
+            {
+                let shell_launch_data = self.shell_launch_data_if_local(ctx);
+                self.on_active_shell_launch_data_updated(shell_launch_data, ctx);
+            }
+
+            // Check if the block is done bootstrapping and the directory is set.
+            if let Some(active_directory) = block_metadata.current_working_directory() {
+                // See `BlockMetadataUpdateSource` for why OSC 7 needs the
+                // CWD-changed gate; precmd keeps its once-per-block semantics.
+                let should_run_detection = match source {
+                    BlockMetadataUpdateSource::Precmd => true,
+                    BlockMetadataUpdateSource::Osc7 => {
+                        prev_block_metadata.current_working_directory()
+                            != block_metadata.current_working_directory()
+                    }
+                };
+                if is_done_bootstrapping && should_run_detection {
+                    // Derive locality directly from the incoming block's
+                    // session_id. We cannot use `active_session_is_local(ctx)`
+                    // here because `active_block_metadata` was just consumed
+                    // via `take()` above, so it would always return `None`
+                    // and misclassify every local session as Remote.
+                    //
+                    // `session_is_local` keeps the shared-session viewer /
+                    // conversation-transcript guard intact.
+                    let session_id = block_metadata.session_id();
+                    let session_type = session_id.map(|sid| {
+                        if self.session_is_local(sid, ctx) {
+                            RepoDetectionSessionType::Local
+                        } else {
+                            RepoDetectionSessionType::Remote { session_id: sid }
+                        }
+                    });
+                    if let Some(session_type) = session_type {
+                        let is_local = matches!(session_type, RepoDetectionSessionType::Local);
+
+                        // For local sessions, convert the shell-native CWD
+                        // (e.g. "/c/Users/..." for Git Bash/MSYS2) to a
+                        // Windows-native path before repo detection.
+                        let directory_for_detection = if is_local {
+                            block_metadata
+                                .session_id()
+                                .and_then(|sid| self.sessions.as_ref(ctx).get(sid))
+                                .and_then(|session| {
+                                    session.launch_data().and_then(|data| {
+                                        data.maybe_convert_absolute_path(active_directory)
+                                    })
+                                })
+                                .map(|path| path.to_string_lossy().into_owned())
+                                .unwrap_or_else(|| active_directory.to_string())
+                        } else {
+                            active_directory.to_string()
+                        };
+
+                        let fut = detect_possible_git_repo(
+                            session_type,
+                            &directory_for_detection,
+                            RepoDetectionSource::TerminalNavigation,
+                            ctx,
+                        );
+
+                        ctx.spawn(fut, move |me, repo_path_opt, ctx| {
+                            let old_repo_path = me.current_repo_path.clone();
+                            me.current_repo_path = repo_path_opt.clone();
+
+                            if old_repo_path != me.current_repo_path {
+                                ctx.emit(Event::Pane(PaneEvent::RepoChanged));
+                            }
+
+                            // `block_completed_callbacks` are scheduled via
+                            // `on_next_block_completed` and expect the block
+                            // to have finished. OSC 7 fires mid-block, so
+                            // draining them here would run callbacks like
+                            // `maybe_set_pending_repo_init_path`'s project
+                            // init before the actual command (e.g. `git
+                            // clone`) finishes.
+                            if matches!(source, BlockMetadataUpdateSource::Precmd) {
+                                let callbacks =
+                                    me.block_completed_callbacks.drain(..).collect_vec();
+                                for callback in callbacks {
+                                    callback(me, ctx);
+                                }
+                            }
+
+                            match &repo_path_opt {
+                                Some(LocalOrRemotePath::Remote(remote_path)) => {
+                                    #[cfg(not(target_family = "wasm"))]
+                                    DetectedRepositories::handle(ctx).update(
+                                        ctx,
+                                        |repos, _| {
+                                            repos.register_remote_repo_root(remote_path.clone());
+                                        },
+                                    );
+
+                                    // Remote sessions can only materialize their working
+                                    // directory after repo detection has resolved the host.
+                                    // Re-run app-state propagation now that the remote path
+                                    // is known so the active session's working directory catches up.
+                                    ctx.emit(Event::AppStateChanged);
+
+                                    if FeatureFlag::AIContextMenuEnabled.is_enabled() {
+                                        me.input.update(ctx, |input, ctx| {
+                                            input
+                                                .check_and_update_ai_context_menu_disabled_state(
+                                                    ctx,
+                                                );
+                                        });
+                                    }
+                                    ctx.emit(Event::Pane(PaneEvent::RemoteRepoNavigated {
+                                        remote_path: remote_path.clone(),
+                                    }));
+                                }
+                                Some(LocalOrRemotePath::Local(repo_path)) => {
+                                    #[cfg(feature = "local_fs")]
+                                    {
+                                        let Some(active_directory) =
+                                            me.active_session_path_if_local(ctx)
+                                        else {
+                                            me.clear_git_repo_status(ctx);
+                                            return;
+                                        };
+
+                                        let Ok(active_directory) =
+                                            repo_metadata::CanonicalizedPath::try_from(
+                                                active_directory,
+                                            )
+                                        else {
+                                            return;
+                                        };
+
+                                        let is_ancestor = active_directory
+                                            .as_path_buf()
+                                            .ancestors()
+                                            .any(|ancestor| ancestor == repo_path.as_path());
+                                        if !is_ancestor {
+                                            return;
+                                        }
+
+                                        PersistedWorkspace::handle(ctx).update(
+                                            ctx,
+                                            |manager, _| {
+                                                manager.navigated_to_path(
+                                                    active_directory.as_path_buf(),
+                                                );
+                                            },
+                                        );
+
+                                        if old_repo_path
+                                            .as_ref()
+                                            .and_then(|p| p.to_local_path())
+                                            != Some(repo_path.as_path())
+                                        {
+                                            me.git_repo_status = None;
+                                            me.update_git_status_subscription(ctx);
+                                        }
+
+                                        me.input.update(ctx, |input, ctx| {
+                                            input.update_repo_path(
+                                                Some(repo_path.clone()),
+                                                ctx,
+                                            );
+                                        });
+
+                                        if FeatureFlag::AIContextMenuEnabled.is_enabled() {
+                                            me.input.update(ctx, |input, ctx| {
+                                                input
+                                                    .check_and_update_ai_context_menu_disabled_state(
+                                                        ctx,
+                                                    );
+                                            });
+                                        }
+
+                                        me.start_lsp_server_in_active_pwd(ctx);
+
+                                        me.update_repo_banner_state(repo_path.clone(), ctx);
+                                    }
+                                    #[cfg(not(feature = "local_fs"))]
+                                    let _ = repo_path;
+                                }
+                                None => {
+                                    #[cfg(feature = "local_fs")]
+                                    me.clear_git_repo_status(ctx);
+                                    ctx.notify();
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+        }
+
+        self.active_block_metadata = Some(block_metadata.clone());
+
+        if let Some(session) = block_metadata
+            .session_id()
+            .and_then(|id| self.sessions.as_ref(ctx).get(id))
+        {
+            let shell_host = ShellHost::from_session(session.as_ref());
+            self.model
+                .lock()
+                .block_list_mut()
+                .set_active_shell_host(shell_host);
+        }
+
+        self.input.update(ctx, |view, ctx| {
+            view.set_active_block_metadata(block_metadata.clone(), is_after_in_band_command, ctx);
+            // Now that we've received the metadata for the active block, redraw the
+            // prompt area so it's up to date.
+            ctx.notify();
         });
     }
 
@@ -11639,241 +11873,41 @@ impl TerminalView {
                 self.handle_control_master_error(ctx);
             }
             ModelEvent::BlockMetadataReceived(block_metadata_received_event) => {
-                let block_metadata = &block_metadata_received_event.block_metadata;
-
-                // In-band commands don't change the CWD, git state, or session
-                // metadata. Skip the expensive processing (git repo detection,
-                // directory indexing, re-renders) to avoid an infinite loop where
-                // a re-render triggers completions which fire another in-band
-                // command. See also the complementary guard in
-                // Input::set_active_block_metadata.
-                if block_metadata_received_event.is_after_in_band_command {
-                    self.active_block_metadata = Some(block_metadata.clone());
-                    self.input.update(ctx, |view, ctx| {
-                        view.set_active_block_metadata(
-                            block_metadata.clone(),
-                            true, // is_after_in_band_command
-                            ctx,
-                        );
-                    });
-                    return;
+                self.apply_block_metadata_update(
+                    &block_metadata_received_event.block_metadata,
+                    block_metadata_received_event.is_after_in_band_command,
+                    block_metadata_received_event.is_done_bootstrapping,
+                    BlockMetadataUpdateSource::Precmd,
+                    ctx,
+                );
+            }
+            ModelEvent::BlockWorkingDirectoryUpdated(block_working_directory_updated_event) => {
+                self.apply_block_metadata_update(
+                    &block_working_directory_updated_event.block_metadata,
+                    block_working_directory_updated_event.is_for_in_band_command,
+                    block_working_directory_updated_event.is_done_bootstrapping,
+                    BlockMetadataUpdateSource::Osc7,
+                    ctx,
+                );
+                // Recompute Warp-prompt chip values (notably the
+                // `WorkingDirectory` chip text that feeds the vertical-tab
+                // subtitle via `display_working_directory`). The chip
+                // generator reads from `CurrentPrompt::latest_context`, which
+                // is only refreshed through `refresh_warp_prompt` →
+                // `current_prompt.update_context`. In the normal precmd flow
+                // that refresh is triggered by `BlockCompleted`, but an OSC 7
+                // fires mid-command — the block never completes — so without
+                // this call the chip text stays stuck on the previous CWD
+                // even though the underlying block metadata is up to date.
+                //
+                // Skip in-band-command blocks for the same reason
+                // `apply_block_metadata_update` bails early on them: in-band
+                // commands don't change CWD, and refreshing the prompt here
+                // can re-fire chip generators that schedule another in-band
+                // command, leading to a refresh loop.
+                if !block_working_directory_updated_event.is_for_in_band_command {
+                    self.refresh_warp_prompt(ctx);
                 }
-
-                if let Some(prev_block_metadata) = self.active_block_metadata.take() {
-                    // Only send event to save app state when the block is post bootstrap
-                    // and working directory has changed.
-                    if prev_block_metadata.current_working_directory()
-                        != block_metadata.current_working_directory()
-                        && block_metadata_received_event.is_done_bootstrapping
-                    {
-                        ctx.emit(Event::AppStateChanged);
-                    }
-
-                    // Update the shell launch data for the active session.
-                    if prev_block_metadata.session_id() != block_metadata.session_id()
-                        && block_metadata_received_event.is_done_bootstrapping
-                    {
-                        let shell_launch_data = self.shell_launch_data_if_local(ctx);
-                        self.on_active_shell_launch_data_updated(shell_launch_data, ctx);
-                    }
-
-                    // Check if the block is done bootstrapping and the directory is set.
-                    if let Some(active_directory) = block_metadata_received_event
-                        .block_metadata
-                        .current_working_directory()
-                    {
-                        if block_metadata_received_event.is_done_bootstrapping {
-                            // Derive locality directly from the incoming block's
-                            // session_id. We cannot use `active_session_is_local(ctx)`
-                            // here because `active_block_metadata` was just consumed
-                            // via `take()` above, so it would always return `None`
-                            // and misclassify every local session as Remote.
-                            //
-                            // `session_is_local` keeps the shared-session viewer /
-                            // conversation-transcript guard intact.
-                            let session_id = block_metadata.session_id();
-                            let session_type = session_id.map(|sid| {
-                                if self.session_is_local(sid, ctx) {
-                                    RepoDetectionSessionType::Local
-                                } else {
-                                    RepoDetectionSessionType::Remote { session_id: sid }
-                                }
-                            });
-                            let Some(session_type) = session_type else {
-                                // Skip detection entirely when session type can't be determined.
-                                self.active_block_metadata = Some(block_metadata.clone());
-                                self.input.update(ctx, |view, ctx| {
-                                    view.set_active_block_metadata(
-                                        block_metadata.clone(),
-                                        block_metadata_received_event.is_after_in_band_command,
-                                        ctx,
-                                    );
-                                    ctx.notify();
-                                });
-                                return;
-                            };
-                            let is_local = matches!(session_type, RepoDetectionSessionType::Local);
-
-                            // For local sessions, convert the shell-native CWD
-                            // (e.g. "/c/Users/..." for Git Bash/MSYS2) to a
-                            // Windows-native path before repo detection.
-                            let directory_for_detection = if is_local {
-                                block_metadata_received_event
-                                    .block_metadata
-                                    .session_id()
-                                    .and_then(|sid| self.sessions.as_ref(ctx).get(sid))
-                                    .and_then(|session| {
-                                        session.launch_data().and_then(|data| {
-                                            data.maybe_convert_absolute_path(active_directory)
-                                        })
-                                    })
-                                    .map(|path| path.to_string_lossy().into_owned())
-                                    .unwrap_or_else(|| active_directory.to_string())
-                            } else {
-                                active_directory.to_string()
-                            };
-
-                            let fut = detect_possible_git_repo(
-                                session_type,
-                                &directory_for_detection,
-                                RepoDetectionSource::TerminalNavigation,
-                                ctx,
-                            );
-
-                            ctx.spawn(fut, move |me, repo_path_opt, ctx| {
-                                let old_repo_path = me.current_repo_path.clone();
-                                me.current_repo_path = repo_path_opt.clone();
-
-                                if old_repo_path != me.current_repo_path {
-                                    ctx.emit(Event::Pane(PaneEvent::RepoChanged));
-                                }
-
-                                let callbacks = me.block_completed_callbacks.drain(..).collect_vec();
-                                for callback in callbacks {
-                                    callback(me, ctx);
-                                }
-
-                                match &repo_path_opt {
-                                    Some(LocalOrRemotePath::Remote(remote_path)) => {
-                                        #[cfg(not(target_family = "wasm"))]
-                                        DetectedRepositories::handle(ctx).update(
-                                            ctx,
-                                            |repos, _| {
-                                                repos.register_remote_repo_root(
-                                                    remote_path.clone(),
-                                                );
-                                            },
-                                        );
-                                        ctx.emit(Event::Pane(PaneEvent::RemoteRepoNavigated {
-                                            remote_path: remote_path.clone(),
-                                        }));
-                                    }
-                                    Some(LocalOrRemotePath::Local(repo_path)) => {
-                                        #[cfg(feature = "local_fs")]
-                                        {
-                                            let Some(active_directory) =
-                                                me.active_session_path_if_local(ctx)
-                                            else {
-                                                me.clear_git_repo_status(ctx);
-                                                return;
-                                            };
-
-                                            let Ok(active_directory) =
-                                                repo_metadata::CanonicalizedPath::try_from(
-                                                    active_directory,
-                                                )
-                                            else {
-                                                return;
-                                            };
-
-                                            let is_ancestor = active_directory
-                                                .as_path_buf()
-                                                .ancestors()
-                                                .any(|ancestor| {
-                                                    ancestor == repo_path.as_path()
-                                                });
-                                            if !is_ancestor {
-                                                return;
-                                            }
-
-                                            PersistedWorkspace::handle(ctx).update(
-                                                ctx,
-                                                |manager, _| {
-                                                    manager.navigated_to_path(
-                                                        active_directory.as_path_buf(),
-                                                    );
-                                                },
-                                            );
-
-                                            if old_repo_path
-                                                .as_ref()
-                                                .and_then(|p| p.to_local_path())
-                                                != Some(repo_path.as_path())
-                                            {
-                                                me.git_repo_status = None;
-                                                me.update_git_status_subscription(ctx);
-                                            }
-
-                                            me.input.update(ctx, |input, ctx| {
-                                                input.update_repo_path(
-                                                    Some(repo_path.clone()),
-                                                    ctx,
-                                                );
-                                            });
-
-                                            if FeatureFlag::AIContextMenuEnabled.is_enabled() {
-                                                me.input.update(ctx, |input, ctx| {
-                                                    input
-                                                        .check_and_update_ai_context_menu_disabled_state(
-                                                            ctx,
-                                                        );
-                                                });
-                                            }
-
-                                            me.start_lsp_server_in_active_pwd(ctx);
-
-                                            me.update_repo_banner_state(
-                                                repo_path.clone(),
-                                                ctx,
-                                            );
-                                        }
-                                        #[cfg(not(feature = "local_fs"))]
-                                        let _ = repo_path;
-                                    }
-                                    None => {
-                                        #[cfg(feature = "local_fs")]
-                                        me.clear_git_repo_status(ctx);
-                                        ctx.notify();
-                                    }
-                                }
-                            });
-                        }
-                    }
-                }
-
-                self.active_block_metadata = Some(block_metadata.clone());
-
-                if let Some(session) = block_metadata
-                    .session_id()
-                    .and_then(|id| self.sessions.as_ref(ctx).get(id))
-                {
-                    let shell_host = ShellHost::from_session(session.as_ref());
-                    self.model
-                        .lock()
-                        .block_list_mut()
-                        .set_active_shell_host(shell_host);
-                }
-
-                self.input.update(ctx, |view, ctx| {
-                    view.set_active_block_metadata(
-                        block_metadata.clone(),
-                        block_metadata_received_event.is_after_in_band_command,
-                        ctx,
-                    );
-                    // Now that we've received the metadata for the active block, redraw the
-                    // prompt area so it's up to date.
-                    ctx.notify();
-                });
             }
             ModelEvent::TerminalModeSwapped(mode) => {
                 #[cfg(feature = "local_tty")]
@@ -13928,11 +13962,7 @@ impl TerminalView {
             .editor()
             .as_ref(ctx)
             .selected_text(ctx);
-        if text.is_empty() {
-            None
-        } else {
-            Some(text)
-        }
+        if text.is_empty() { None } else { Some(text) }
     }
 }
 
@@ -14181,9 +14211,11 @@ impl TerminalView {
         ctx: &mut ViewContext<Self>,
     ) {
         AISettings::handle(ctx).update(ctx, |settings, ctx| {
-            report_if_error!(settings
-                .nld_in_terminal_enabled_internal
-                .set_value(enable, ctx));
+            report_if_error!(
+                settings
+                    .nld_in_terminal_enabled_internal
+                    .set_value(enable, ctx)
+            );
         });
     }
 
@@ -15909,11 +15941,13 @@ impl TerminalView {
                             Some(model.link_at_range(url, RespectObfuscatedSecrets::Yes));
                         url_content
                             .map(|url_content| {
-                                vec![MenuItemFields::new("Copy URL")
-                                    .with_on_select_action(TerminalAction::ContextMenu(
-                                        ContextMenuAction::CopyUrl { url_content },
-                                    ))
-                                    .into_item()]
+                                vec![
+                                    MenuItemFields::new("Copy URL")
+                                        .with_on_select_action(TerminalAction::ContextMenu(
+                                            ContextMenuAction::CopyUrl { url_content },
+                                        ))
+                                        .into_item(),
+                                ]
                             })
                             .unwrap_or_default()
                     }
@@ -16226,24 +16260,30 @@ impl TerminalView {
                         ))
                         .into_item(),
                 ]);
-                items.append(&mut vec![MenuItemFields::new("Toggle block filter")
-                    .with_on_select_action(TerminalAction::ToggleBlockFilterOnSelectedOrLastBlock(
-                        ToggleBlockFilterSource::ContextMenu,
-                    ))
-                    .with_key_shortcut_label(keybinding_name_to_display_string(
-                        TOGGLE_BLOCK_FILTER_KEYBINDING,
-                        ctx,
-                    ))
-                    .into_item()]);
-                items.append(&mut vec![MenuItemFields::new("Toggle bookmark")
-                    .with_on_select_action(TerminalAction::ContextMenu(
-                        ContextMenuAction::ToggleBookmark,
-                    ))
-                    .with_key_shortcut_label(keybinding_name_to_display_string(
-                        "terminal:bookmark_selected_block",
-                        ctx,
-                    ))
-                    .into_item()]);
+                items.append(&mut vec![
+                    MenuItemFields::new("Toggle block filter")
+                        .with_on_select_action(
+                            TerminalAction::ToggleBlockFilterOnSelectedOrLastBlock(
+                                ToggleBlockFilterSource::ContextMenu,
+                            ),
+                        )
+                        .with_key_shortcut_label(keybinding_name_to_display_string(
+                            TOGGLE_BLOCK_FILTER_KEYBINDING,
+                            ctx,
+                        ))
+                        .into_item(),
+                ]);
+                items.append(&mut vec![
+                    MenuItemFields::new("Toggle bookmark")
+                        .with_on_select_action(TerminalAction::ContextMenu(
+                            ContextMenuAction::ToggleBookmark,
+                        ))
+                        .with_key_shortcut_label(keybinding_name_to_display_string(
+                            "terminal:bookmark_selected_block",
+                            ctx,
+                        ))
+                        .into_item(),
+                ]);
 
                 items.append(&mut vec![
                     MenuItem::Separator,
@@ -16257,15 +16297,17 @@ impl TerminalView {
                         ))
                         .into_item(),
                 ]);
-                items.append(&mut vec![MenuItemFields::new(scroll_to_bottom_str)
-                    .with_on_select_action(TerminalAction::ContextMenu(
-                        ContextMenuAction::ScrollToBottomOfBlock,
-                    ))
-                    .with_key_shortcut_label(keybinding_name_to_display_string(
-                        "terminal:scroll_to_bottom_of_selected_block",
-                        ctx,
-                    ))
-                    .into_item()]);
+                items.append(&mut vec![
+                    MenuItemFields::new(scroll_to_bottom_str)
+                        .with_on_select_action(TerminalAction::ContextMenu(
+                            ContextMenuAction::ScrollToBottomOfBlock,
+                        ))
+                        .with_key_shortcut_label(keybinding_name_to_display_string(
+                            "terminal:scroll_to_bottom_of_selected_block",
+                            ctx,
+                        ))
+                        .into_item(),
+                ]);
 
                 // Add debugging link for command blocks run by the agent
                 if is_single_selection {
@@ -16500,12 +16542,14 @@ impl TerminalView {
         is_rprompt_shown: bool,
         position: PromptPosition,
     ) -> Vec<MenuItem<TerminalAction>> {
-        let mut items = vec![MenuItemFields::new("Copy prompt")
-            .with_on_select_action(TerminalAction::ContextMenu(ContextMenuAction::CopyPrompt {
-                position,
-                part: PromptPart::EntirePrompt,
-            }))
-            .into_item()];
+        let mut items = vec![
+            MenuItemFields::new("Copy prompt")
+                .with_on_select_action(TerminalAction::ContextMenu(ContextMenuAction::CopyPrompt {
+                    position,
+                    part: PromptPart::EntirePrompt,
+                }))
+                .into_item(),
+        ];
 
         if is_rprompt_shown {
             items.push(
@@ -20320,6 +20364,14 @@ impl TerminalView {
         active_block.index() == block_index && active_block.is_active_and_long_running()
     }
 
+    pub fn has_active_long_running_command(&self) -> bool {
+        let model = self.model.lock();
+        model
+            .block_list()
+            .active_block()
+            .is_active_and_long_running()
+    }
+
     /// If password notification settings enabled, send a notification.
     /// Otherwise, set the banner trigger so that we show the banner the next
     /// time a block completes.
@@ -21298,9 +21350,11 @@ impl TerminalView {
             set_custom_keybinding(MOVE_LINE_END_BINDING_NAME, &CTRL_E_KEYSTROKE, ctx);
         }
         EmacsBindingsSettings::handle(ctx).update(ctx, |settings_model, settings_ctx| {
-            report_if_error!(settings_model
-                .emacs_bindings_banner_state
-                .set_value(BannerState::Dismissed, settings_ctx));
+            report_if_error!(
+                settings_model
+                    .emacs_bindings_banner_state
+                    .set_value(BannerState::Dismissed, settings_ctx)
+            );
         });
         self.is_emacs_bindings_banner_open = false;
         ctx.notify();
@@ -21736,13 +21790,11 @@ impl TerminalView {
     ) -> ViewHandle<AIBlock> {
         use rand::distributions::{Alphanumeric, DistString};
 
-        use crate::ai::{
-            agent::{
-                AIAgentInput, AIAgentOutput, AIAgentOutputMessage, AIAgentText, AIAgentTextSection,
-                MessageId, ServerOutputId,
-            },
-            blocklist::FakeAIBlockModel,
+        use crate::ai::agent::{
+            AIAgentInput, AIAgentOutput, AIAgentOutputMessage, AIAgentText, AIAgentTextSection,
+            MessageId, ServerOutputId,
         };
+        use crate::ai::blocklist::FakeAIBlockModel;
 
         let inputs = vec![AIAgentInput::UserQuery {
             query,
@@ -25991,16 +26043,17 @@ impl TypedActionView for TerminalView {
                 let mut images = Vec::new();
                 let mut initial_index = None;
                 for (attachment_index, image) in pending_images {
-                    let image_bytes =
-                        match base64::engine::general_purpose::STANDARD.decode(&image.data) {
-                            Ok(image_bytes) => image_bytes,
-                            Err(error) => {
-                                log::warn!(
+                    let image_bytes = match base64::engine::general_purpose::STANDARD
+                        .decode(&image.data)
+                    {
+                        Ok(image_bytes) => image_bytes,
+                        Err(error) => {
+                            log::warn!(
                                 "Failed to decode pending image attachment for lightbox: {error}"
                             );
-                                continue;
-                            }
-                        };
+                            continue;
+                        }
+                    };
 
                     let asset_id = format!("pending-attachment-lightbox-{attachment_index}");
                     AssetCache::handle(ctx).update(ctx, |asset_cache, ctx| {
@@ -26575,7 +26628,7 @@ impl View for TerminalView {
 
                     let stack = Stack::new()
                         .with_constrain_absolute_children()
-                        .with_child(column.finish());
+                        .with_child(Clipped::new(column.finish()).finish());
                     if matches!(input_mode, InputMode::Waterfall) && !is_alt_screen_active {
                         self.render_waterfall_mode_background(&model, stack, app)
                     } else {

@@ -1,16 +1,17 @@
 //! Rendering functions for orchestration-related output items (messaging & agent management).
 
+use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine};
 use pathfinder_color::ColorU;
 use warpui::elements::{
-    ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Flex, Hoverable,
-    MouseStateHandle, ParentElement, Radius, Shrinkable, Text,
+    ConstrainedBox, Container, CornerRadius, CrossAxisAlignment, Empty, Flex, FormattedTextElement,
+    Hoverable, MouseStateHandle, ParentElement, Radius, Shrinkable, Text,
 };
 use warpui::platform::Cursor;
 use warpui::{AppContext, Element, SingletonEntity};
 
-use markdown_parser::{FormattedText, FormattedTextFragment, FormattedTextLine};
-use warpui::elements::FormattedTextElement;
-
+use super::WithContentItemSpacing;
+use super::common::render_scrollable_collapsible_content;
+use super::output::{Props, action_icon};
 use crate::ai::agent::conversation::{
     AIConversation, AIConversationId, ConversationStatus, StatusColorStyle,
 };
@@ -18,6 +19,7 @@ use crate::ai::agent::{
     AIAgentActionId, AIAgentActionResultType, MessageId, ReceivedMessageDisplay,
     SendMessageToAgentResult, StartAgentExecutionMode, StartAgentResult,
 };
+use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::ai::blocklist::action_model::AIActionStatus;
 use crate::ai::blocklist::agent_view::orchestration_avatar::OrchestrationAvatar;
 use crate::ai::blocklist::agent_view::orchestration_conversation_links::{
@@ -26,7 +28,7 @@ use crate::ai::blocklist::agent_view::orchestration_conversation_links::{
 };
 use crate::ai::blocklist::block::model::AIBlockModelHelper;
 use crate::ai::blocklist::block::{
-    received_message_collapsible_id, AIBlockAction, CollapsibleExpansionState,
+    AIBlockAction, CollapsibleExpansionState, received_message_collapsible_id,
 };
 use crate::ai::blocklist::inline_action::inline_action_header::{
     ICON_MARGIN, INLINE_ACTION_HEADER_VERTICAL_PADDING, INLINE_ACTION_HORIZONTAL_PADDING,
@@ -35,15 +37,10 @@ use crate::ai::blocklist::inline_action::inline_action_icons::{self, icon_size};
 use crate::ai::blocklist::inline_action::requested_action::{
     render_requested_action_row, render_requested_action_row_for_text,
 };
-use crate::ai::blocklist::BlocklistAIHistoryModel;
 use crate::appearance::Appearance;
 use crate::terminal::view::TerminalAction;
 use crate::ui_components::blended_colors;
 use crate::ui_components::icons::Icon;
-
-use super::common::render_scrollable_collapsible_content;
-use super::output::{action_icon, Props};
-use super::WithContentItemSpacing;
 
 const GENERATING_TITLE_PLACEHOLDER: &str = "Generating title...";
 const ORCHESTRATION_COLLAPSED_MAX_HEIGHT: f32 = 200.;

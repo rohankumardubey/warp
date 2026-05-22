@@ -9,12 +9,10 @@
 mod warpify;
 
 pub use warpify::*;
-use warpui::{
-    elements::{
-        ConstrainedBox, Container, CornerRadius, Hoverable, MouseState, MouseStateHandle,
-        ParentElement, Radius, Stack,
-    },
-    Element,
+use warpui::Element;
+use warpui::elements::{
+    ConstrainedBox, Container, CornerRadius, Hoverable, MouseState, MouseStateHandle,
+    ParentElement, Radius, Stack,
 };
 
 use crate::themes::theme::WarpTheme;
