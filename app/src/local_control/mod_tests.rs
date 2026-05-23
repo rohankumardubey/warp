@@ -29,10 +29,12 @@ use super::{
     block_get_result_from_model, block_list_result_from_model, capabilities,
     ensure_feature_enabled, ensure_input_run_policy_allows, ensure_settings_allow_action,
     outside_warp_action_enabled_for_settings, rejected_setting_key, require_active_window_id,
-    require_active_window_id_for_action, setting_get_result, setting_list_result,
-    theme_list_result, validate_action_params, validate_block_get_target,
-    validate_block_list_target, validate_drive_target, validate_instance_metadata_read_target,
-    validate_tab_create_target, validate_terminal_read_target, LocalControlBridge,
+    require_active_window_id_for_action, select_window_for_app_state_target, setting_get_result,
+    setting_list_result, theme_list_result, validate_action_params, validate_app_focus_target,
+    validate_block_get_target, validate_block_list_target, validate_drive_target,
+    validate_instance_metadata_read_target, validate_tab_create_target,
+    validate_terminal_read_target, validate_window_create_target, workspace_action_for_surface,
+    LocalControlBridge,
 };
 use crate::auth::AuthStateProvider;
 use crate::cloud_object::model::persistence::CloudModel;
@@ -48,6 +50,7 @@ use crate::settings::{
 use crate::terminal::model::TerminalModel;
 use crate::test_util::settings::initialize_settings_for_tests;
 use crate::workflows::{workflow::Workflow, CloudWorkflow, CloudWorkflowModel};
+use crate::workspace::WorkspaceAction;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 
 fn settings_with_values(
@@ -121,6 +124,16 @@ fn initialize_drive_app(app: &mut App, logged_in: bool) {
     }
     app.add_singleton_model(CloudModel::mock);
     app.add_singleton_model(UserWorkspaces::default_mock);
+    app.add_singleton_model(LocalControlBridge::new);
+}
+
+fn initialize_app_state_app(app: &mut App, logged_in: bool) {
+    initialize_settings_for_tests(app);
+    if logged_in {
+        app.add_singleton_model(|_| AuthStateProvider::new_for_test());
+    } else {
+        app.add_singleton_model(|_| AuthStateProvider::new_logged_out_for_test());
+    }
     app.add_singleton_model(LocalControlBridge::new);
 }
 
@@ -299,7 +312,7 @@ fn tab_create_rejects_unsupported_selector_forms() {
 }
 
 #[test]
-fn capabilities_advertises_only_first_slice_core_actions() {
+fn capabilities_advertises_implemented_actions() {
     assert_eq!(
         capabilities(),
         vec![
@@ -310,7 +323,20 @@ fn capabilities_advertises_only_first_slice_core_actions() {
             ActionKind::AppActive,
             ActionKind::ActionList,
             ActionKind::ActionGet,
+            ActionKind::AppFocus,
+            ActionKind::AppSettingsOpen,
+            ActionKind::AppCommandPaletteOpen,
+            ActionKind::AppCommandSearchOpen,
+            ActionKind::AppWarpDriveOpen,
+            ActionKind::AppWarpDriveToggle,
+            ActionKind::AppResourceCenterToggle,
+            ActionKind::AppAiAssistantToggle,
+            ActionKind::AppCodeReviewToggle,
+            ActionKind::AppVerticalTabsToggle,
             ActionKind::WindowList,
+            ActionKind::WindowCreate,
+            ActionKind::WindowFocus,
+            ActionKind::WindowClose,
             ActionKind::TabList,
             ActionKind::TabCreate,
             ActionKind::PaneList,
@@ -639,6 +665,56 @@ fn disabled_granular_permission_denies_with_insufficient_permissions() {
     .expect_err("read-write permission is disabled");
     assert_eq!(err.code, ErrorCode::InsufficientPermissions);
 }
+#[test]
+fn app_state_mutations_require_read_write_permission() {
+    let settings = settings_with_values(true, true, true, true, false, false);
+
+    for action in [
+        ActionKind::AppFocus,
+        ActionKind::AppSettingsOpen,
+        ActionKind::AppCommandPaletteOpen,
+        ActionKind::AppCommandSearchOpen,
+        ActionKind::AppWarpDriveOpen,
+        ActionKind::AppWarpDriveToggle,
+        ActionKind::AppResourceCenterToggle,
+        ActionKind::AppAiAssistantToggle,
+        ActionKind::AppCodeReviewToggle,
+        ActionKind::AppVerticalTabsToggle,
+        ActionKind::WindowCreate,
+        ActionKind::WindowFocus,
+        ActionKind::WindowClose,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::MutateAppState
+        );
+        let err = ensure_settings_allow_action(&settings, InvocationContext::InsideWarp, action)
+            .expect_err("app-state mutation permission is disabled");
+        assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+    }
+}
+
+#[test]
+fn app_state_mutation_grants_require_authenticated_user_and_action_scope() {
+    let grant = CredentialGrant::new(
+        InstanceId("instance".to_owned()),
+        ActionKind::AppFocus,
+        InvocationContext::OutsideWarp,
+        Duration::minutes(5),
+    );
+
+    let err = grant
+        .verify_for_action(ActionKind::AppFocus)
+        .expect_err("app.focus requires authenticated user grant");
+    assert_eq!(err.code, ErrorCode::AuthenticatedUserRequired);
+
+    let mut grant = grant;
+    grant.authenticated_user.subject = Some("user".to_owned());
+    let err = grant
+        .verify_for_action(ActionKind::WindowFocus)
+        .expect_err("app.focus credential cannot focus a window");
+    assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+}
 
 #[test]
 fn metadata_read_actions_require_read_permission() {
@@ -799,14 +875,173 @@ fn tab_create_rejects_malformed_params() {
 }
 
 #[test]
-fn action_metadata_lookup_reports_stub_status_for_allowlisted_future_actions() {
+fn action_metadata_lookup_reports_implemented_status_for_window_create() {
     let metadata = action_metadata_for_name("window.create").expect("allowlisted action");
 
     assert_eq!(metadata.kind, ActionKind::WindowCreate);
     assert_eq!(
         metadata.implementation_status,
-        ::local_control::ActionImplementationStatus::Stub
+        ::local_control::ActionImplementationStatus::Implemented
     );
+}
+
+#[test]
+fn app_state_targets_reject_unsupported_and_stale_selectors() {
+    let err = validate_app_focus_target(&TargetSelector {
+        window: Some(WindowTarget::Active),
+        ..TargetSelector::default()
+    })
+    .expect_err("app.focus rejects target selectors");
+    assert_eq!(err.code, ErrorCode::InvalidSelector);
+
+    let err = validate_window_create_target(
+        &TargetSelector {
+            tab: Some(TabTarget::Active),
+            ..TargetSelector::default()
+        },
+        &WindowCreateParams::default(),
+    )
+    .expect_err("window.create rejects target selectors");
+    assert_eq!(err.code, ErrorCode::InvalidSelector);
+
+    let err = validate_window_create_target(
+        &TargetSelector::default(),
+        &WindowCreateParams {
+            profile: Some("Default".to_owned()),
+        },
+    )
+    .expect_err("window.create profile selection is unsupported");
+    assert_eq!(err.code, ErrorCode::UnsupportedAction);
+
+    with_local_control_bridge(|_, ctx| {
+        let err = select_window_for_app_state_target(
+            ActionKind::WindowFocus,
+            &TargetSelector::default(),
+            ctx,
+        )
+        .expect_err("window.focus requires an active window");
+        assert_eq!(err.code, ErrorCode::MissingTarget);
+
+        let err = select_window_for_app_state_target(
+            ActionKind::WindowFocus,
+            &TargetSelector {
+                window: Some(WindowTarget::Id {
+                    id: WindowSelector("stale-window".to_owned()),
+                }),
+                ..TargetSelector::default()
+            },
+            ctx,
+        )
+        .expect_err("window.focus rejects stale window id");
+        assert_eq!(err.code, ErrorCode::StaleTarget);
+
+        let err = select_window_for_app_state_target(
+            ActionKind::WindowClose,
+            &TargetSelector {
+                pane: Some(PaneTarget::Active),
+                ..TargetSelector::default()
+            },
+            ctx,
+        )
+        .expect_err("window.close rejects pane selectors");
+        assert_eq!(err.code, ErrorCode::InvalidSelector);
+    });
+}
+
+#[test]
+fn app_surface_actions_validate_params_and_map_to_allowlisted_workspace_actions() {
+    let settings_action = workspace_action_for_surface(
+        ActionKind::AppSettingsOpen,
+        AppSurfaceParams {
+            query: Some("font".to_owned()),
+            page: Some("appearance".to_owned()),
+        },
+    )
+    .expect("settings surface maps to workspace action");
+    let WorkspaceAction::ShowSettingsPageWithSearch {
+        search_query,
+        section,
+    } = settings_action
+    else {
+        panic!("expected settings search action");
+    };
+    assert_eq!(search_query, "font");
+    assert!(section.is_some());
+
+    let palette_action = workspace_action_for_surface(
+        ActionKind::AppCommandPaletteOpen,
+        AppSurfaceParams {
+            query: Some("new tab".to_owned()),
+            page: None,
+        },
+    )
+    .expect("command palette maps to workspace action");
+    let WorkspaceAction::OpenPalette { query, .. } = palette_action else {
+        panic!("expected command palette action");
+    };
+    assert_eq!(query.as_deref(), Some("new tab"));
+
+    let drive_action =
+        workspace_action_for_surface(ActionKind::AppWarpDriveToggle, AppSurfaceParams::default())
+            .expect("warp drive toggle maps to workspace action");
+    assert!(matches!(drive_action, WorkspaceAction::ToggleWarpDrive));
+
+    let err = workspace_action_for_surface(
+        ActionKind::AppCommandPaletteOpen,
+        AppSurfaceParams {
+            query: None,
+            page: Some("commands".to_owned()),
+        },
+    )
+    .expect_err("command palette rejects page");
+    assert_eq!(err.code, ErrorCode::InvalidParams);
+
+    let err = workspace_action_for_surface(
+        ActionKind::AppWarpDriveToggle,
+        AppSurfaceParams {
+            query: Some("workflows".to_owned()),
+            page: None,
+        },
+    )
+    .expect_err("toggle surface rejects params");
+    assert_eq!(err.code, ErrorCode::InvalidParams);
+}
+
+#[test]
+fn app_focus_handler_requires_authenticated_user_and_can_succeed_without_windows() {
+    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
+
+    App::test((), |mut app| async move {
+        initialize_app_state_app(&mut app, true);
+        LocalControlBridge::handle(&app).update(&mut app, |bridge, ctx| {
+            let response = bridge.handle_request(
+                RequestEnvelope::new(Action::new(ActionKind::AppFocus)),
+                authenticated_grant(ActionKind::AppFocus, ctx),
+                ctx,
+            );
+            let ControlResponse::Ok { data } = response.response else {
+                panic!("expected ok response");
+            };
+            assert_eq!(data["action"], ActionKind::AppFocus.as_str());
+            assert_eq!(data["focused"], true);
+            assert_eq!(data["window_id"], serde_json::Value::Null);
+        });
+    });
+
+    App::test((), |mut app| async move {
+        initialize_app_state_app(&mut app, false);
+        LocalControlBridge::handle(&app).update(&mut app, |bridge, ctx| {
+            let response = bridge.handle_request(
+                RequestEnvelope::new(Action::new(ActionKind::AppFocus)),
+                spoofed_authenticated_grant(ActionKind::AppFocus),
+                ctx,
+            );
+            assert_eq!(
+                response_error_code(response),
+                ErrorCode::AuthenticatedUserUnavailable
+            );
+        });
+    });
 }
 
 #[test]

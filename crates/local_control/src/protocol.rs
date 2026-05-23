@@ -1187,7 +1187,20 @@ impl ActionKind {
             | Self::AppActive
             | Self::ActionList
             | Self::ActionGet
+            | Self::AppFocus
+            | Self::AppSettingsOpen
+            | Self::AppCommandPaletteOpen
+            | Self::AppCommandSearchOpen
+            | Self::AppWarpDriveOpen
+            | Self::AppWarpDriveToggle
+            | Self::AppResourceCenterToggle
+            | Self::AppAiAssistantToggle
+            | Self::AppCodeReviewToggle
+            | Self::AppVerticalTabsToggle
             | Self::WindowList
+            | Self::WindowCreate
+            | Self::WindowFocus
+            | Self::WindowClose
             | Self::TabList
             | Self::TabCreate
             | Self::PaneList
@@ -1460,8 +1473,24 @@ impl ActionKind {
         if matches!(
             self.default_risk_tier(),
             RiskTier::ReadOnlyMetadata | RiskTier::ReadOnlyTerminalData
-        ) || matches!(self, Self::TabCreate | Self::InputRun)
-        {
+        ) || matches!(
+            self,
+            Self::AppFocus
+                | Self::AppSettingsOpen
+                | Self::AppCommandPaletteOpen
+                | Self::AppCommandSearchOpen
+                | Self::AppWarpDriveOpen
+                | Self::AppWarpDriveToggle
+                | Self::AppResourceCenterToggle
+                | Self::AppAiAssistantToggle
+                | Self::AppCodeReviewToggle
+                | Self::AppVerticalTabsToggle
+                | Self::WindowCreate
+                | Self::WindowFocus
+                | Self::WindowClose
+                | Self::TabCreate
+                | Self::InputRun
+        ) {
             return vec![
                 InvocationContext::InsideWarp,
                 InvocationContext::OutsideWarp,

@@ -7,8 +7,11 @@ use crate::code::view::CodeView;
 use crate::env_vars::CloudEnvVarCollection;
 use crate::features::FeatureFlag;
 use crate::notebooks::CloudNotebook;
+use crate::palette::PaletteMode;
 use crate::pane_group::{PaneGroup, PaneId};
 use crate::projects::ProjectManagementModel;
+use crate::root_view;
+use crate::server::telemetry::PaletteSource;
 use crate::terminal::model::session::SessionId;
 use crate::terminal::model::TerminalModel;
 use std::collections::{BTreeMap, HashMap};
@@ -21,12 +24,13 @@ use crate::settings::{
     AccessibilitySettings, FontSettings, InputSettings, LocalControlInvocationContext,
     LocalControlPermissionCategory, LocalControlSettings, ThemeSettings,
 };
+use crate::settings_view::SettingsSection;
 use crate::terminal::view::TerminalView;
 use crate::terminal::History;
 use crate::themes::theme::ThemeKind;
 use crate::user_config::WarpConfig;
 use crate::workflows::CloudWorkflow;
-use crate::workspace::ActiveSession;
+use crate::workspace::{ActiveSession, CommandSearchOptions, InitContent};
 use crate::WindowSettings;
 use ::local_control::auth::{CredentialGrant, CredentialRequest, ScopedCredential};
 use ::local_control::protocol::{
@@ -62,6 +66,7 @@ use serde_json::json;
 use serde_json::Value;
 use settings::Setting as _;
 use warp_core::channel::ChannelState;
+use warpui::platform::TerminationMode;
 use warpui::{
     Entity, ModelContext, ModelSpawner, SingletonEntity, TypedActionView, ViewHandle, WindowId,
 };
@@ -477,6 +482,102 @@ impl LocalControlBridge {
                     Err(error) => ResponseEnvelope::error(request.request_id, error),
                 }
             }
+            ActionKind::AppFocus => {
+                if let Err(error) = ensure_authenticated_user_matches(&grant, ctx) {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                match self.focus_app(&request.target, ctx) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
+            ActionKind::WindowCreate => {
+                if let Err(error) = ensure_authenticated_user_matches(&grant, ctx) {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                match request
+                    .action
+                    .params_as::<WindowCreateParams>()
+                    .and_then(|params| self.create_window(&request.target, params, ctx))
+                {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
+            ActionKind::WindowFocus => {
+                if let Err(error) = ensure_authenticated_user_matches(&grant, ctx) {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                match self.focus_window(&request.target, ctx) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
+            ActionKind::WindowClose => {
+                if let Err(error) = ensure_authenticated_user_matches(&grant, ctx) {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                match request
+                    .action
+                    .params_as::<WindowCloseParams>()
+                    .and_then(|params| self.close_window(&request.target, params, ctx))
+                {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
+            ActionKind::AppSettingsOpen
+            | ActionKind::AppCommandPaletteOpen
+            | ActionKind::AppCommandSearchOpen
+            | ActionKind::AppWarpDriveOpen
+            | ActionKind::AppWarpDriveToggle
+            | ActionKind::AppResourceCenterToggle
+            | ActionKind::AppAiAssistantToggle
+            | ActionKind::AppCodeReviewToggle
+            | ActionKind::AppVerticalTabsToggle => {
+                if let Err(error) = ensure_authenticated_user_matches(&grant, ctx) {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                match request
+                    .action
+                    .params_as::<AppSurfaceParams>()
+                    .and_then(|params| {
+                        self.open_or_toggle_surface(
+                            request.action.kind,
+                            &request.target,
+                            params,
+                            ctx,
+                        )
+                    }) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
             ActionKind::TabCreate => {
                 if let Err(error) =
                     ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
@@ -647,6 +748,92 @@ impl LocalControlBridge {
                 "count": tab_count,
                 "active_index": active_tab_index,
             },
+        }))
+    }
+
+    fn focus_app(
+        &mut self,
+        target: &TargetSelector,
+        ctx: &mut ModelContext<Self>,
+    ) -> Result<serde_json::Value, ControlError> {
+        validate_app_focus_target(target)?;
+        let window_id = ctx.windows().activate_app();
+        Ok(json!({
+            "action": ActionKind::AppFocus.as_str(),
+            "focused": true,
+            "window_id": window_id.map(|id| id.to_string()),
+        }))
+    }
+
+    fn create_window(
+        &mut self,
+        target: &TargetSelector,
+        params: WindowCreateParams,
+        ctx: &mut ModelContext<Self>,
+    ) -> Result<serde_json::Value, ControlError> {
+        validate_window_create_target(target, &params)?;
+        let (window_id, _) = root_view::open_new_window_get_handles(None, ctx);
+        ctx.windows().show_window_and_focus_app(window_id);
+        Ok(json!({
+            "action": ActionKind::WindowCreate.as_str(),
+            "created": true,
+            "window_id": window_id.to_string(),
+        }))
+    }
+
+    fn focus_window(
+        &mut self,
+        target: &TargetSelector,
+        ctx: &mut ModelContext<Self>,
+    ) -> Result<serde_json::Value, ControlError> {
+        let window_id = select_window_for_app_state_target(ActionKind::WindowFocus, target, ctx)?;
+        ctx.windows().show_window_and_focus_app(window_id);
+        Ok(json!({
+            "action": ActionKind::WindowFocus.as_str(),
+            "focused": true,
+            "window_id": window_id.to_string(),
+        }))
+    }
+
+    fn close_window(
+        &mut self,
+        target: &TargetSelector,
+        params: WindowCloseParams,
+        ctx: &mut ModelContext<Self>,
+    ) -> Result<serde_json::Value, ControlError> {
+        let window_id = select_window_for_app_state_target(ActionKind::WindowClose, target, ctx)?;
+        let termination_mode = if params.force {
+            TerminationMode::ForceTerminate
+        } else {
+            TerminationMode::Cancellable
+        };
+        ctx.windows().close_window(window_id, termination_mode);
+        Ok(json!({
+            "action": ActionKind::WindowClose.as_str(),
+            "closed": true,
+            "force": params.force,
+            "window_id": window_id.to_string(),
+        }))
+    }
+
+    fn open_or_toggle_surface(
+        &mut self,
+        action: ActionKind,
+        target: &TargetSelector,
+        params: AppSurfaceParams,
+        ctx: &mut ModelContext<Self>,
+    ) -> Result<serde_json::Value, ControlError> {
+        let window_id = select_window_for_app_state_target(action, target, ctx)?;
+        let workspace = workspace_for_window(action, window_id, ctx)?;
+        let workspace_action = workspace_action_for_surface(action, params)?;
+        workspace.update(ctx, |workspace, ctx| {
+            workspace.handle_action(&workspace_action, ctx);
+        });
+        ctx.windows().show_window_and_focus_app(window_id);
+        Ok(json!({
+            "action": action.as_str(),
+            "handled": true,
+            "window_id": window_id.to_string(),
         }))
     }
 
@@ -1578,6 +1765,224 @@ fn reject_target_families(
     Ok(())
 }
 
+fn validate_app_focus_target(target: &TargetSelector) -> Result<(), ControlError> {
+    if target.window.is_some()
+        || target.tab.is_some()
+        || target.pane.is_some()
+        || target.session.is_some()
+        || target.block.is_some()
+        || target.file.is_some()
+        || target.drive.is_some()
+    {
+        return Err(ControlError::new(
+            ErrorCode::InvalidSelector,
+            "app.focus does not accept target selectors",
+        ));
+    }
+    Ok(())
+}
+
+fn validate_window_create_target(
+    target: &TargetSelector,
+    params: &WindowCreateParams,
+) -> Result<(), ControlError> {
+    if target.window.is_some()
+        || target.tab.is_some()
+        || target.pane.is_some()
+        || target.session.is_some()
+        || target.block.is_some()
+        || target.file.is_some()
+        || target.drive.is_some()
+    {
+        return Err(ControlError::new(
+            ErrorCode::InvalidSelector,
+            "window.create does not accept target selectors",
+        ));
+    }
+    if params.profile.is_some() {
+        return Err(ControlError::new(
+            ErrorCode::UnsupportedAction,
+            "window.create does not support selecting a profile yet",
+        ));
+    }
+    Ok(())
+}
+
+fn select_window_for_app_state_target(
+    action: ActionKind,
+    target: &TargetSelector,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<WindowId, ControlError> {
+    reject_target_families(
+        action,
+        target.tab.is_some()
+            || target.pane.is_some()
+            || target.session.is_some()
+            || target.block.is_some()
+            || target.file.is_some()
+            || target.drive.is_some(),
+        "tab, pane, session, block, file, or drive selectors",
+    )?;
+    let window_ids = select_window_ids(target, true, action, ctx)?;
+    window_ids.into_iter().next().ok_or_else(|| {
+        ControlError::new(
+            ErrorCode::MissingTarget,
+            format!("{} requires an active Warp window", action.as_str()),
+        )
+    })
+}
+
+fn workspace_for_window(
+    action: ActionKind,
+    window_id: WindowId,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<ViewHandle<Workspace>, ControlError> {
+    ctx.views_of_type::<Workspace>(window_id)
+        .and_then(|workspaces| workspaces.into_iter().next())
+        .ok_or_else(|| {
+            ControlError::new(
+                ErrorCode::MissingTarget,
+                format!(
+                    "{} requires a workspace in the target window",
+                    action.as_str()
+                ),
+            )
+        })
+}
+
+fn workspace_action_for_surface(
+    action: ActionKind,
+    params: AppSurfaceParams,
+) -> Result<WorkspaceAction, ControlError> {
+    match action {
+        ActionKind::AppSettingsOpen => settings_surface_action(params),
+        ActionKind::AppCommandPaletteOpen => command_palette_surface_action(params),
+        ActionKind::AppCommandSearchOpen => command_search_surface_action(params),
+        ActionKind::AppWarpDriveOpen => {
+            no_params_surface_action(action, params, WorkspaceAction::OpenWarpDrive)
+        }
+        ActionKind::AppWarpDriveToggle => {
+            no_params_surface_action(action, params, WorkspaceAction::ToggleWarpDrive)
+        }
+        ActionKind::AppResourceCenterToggle => {
+            no_params_surface_action(action, params, WorkspaceAction::ToggleResourceCenter)
+        }
+        ActionKind::AppAiAssistantToggle => {
+            no_params_surface_action(action, params, WorkspaceAction::ToggleAIAssistant)
+        }
+        ActionKind::AppCodeReviewToggle => {
+            no_params_surface_action(action, params, WorkspaceAction::ToggleRightPanel)
+        }
+        ActionKind::AppVerticalTabsToggle => {
+            no_params_surface_action(action, params, WorkspaceAction::ToggleVerticalTabsPanel)
+        }
+        _ => Err(ControlError::new(
+            ErrorCode::UnsupportedAction,
+            format!("{} is not an app surface action", action.as_str()),
+        )),
+    }
+}
+
+fn settings_surface_action(params: AppSurfaceParams) -> Result<WorkspaceAction, ControlError> {
+    let section = params
+        .page
+        .as_deref()
+        .map(settings_section_from_param)
+        .transpose()?;
+    match (section, params.query) {
+        (Some(section), Some(query)) => Ok(WorkspaceAction::ShowSettingsPageWithSearch {
+            search_query: query,
+            section: Some(section),
+        }),
+        (None, Some(query)) => Ok(WorkspaceAction::ShowSettingsPageWithSearch {
+            search_query: query,
+            section: None,
+        }),
+        (Some(section), None) => Ok(WorkspaceAction::ShowSettingsPage(section)),
+        (None, None) => Ok(WorkspaceAction::ShowSettings),
+    }
+}
+
+fn command_palette_surface_action(
+    params: AppSurfaceParams,
+) -> Result<WorkspaceAction, ControlError> {
+    reject_surface_page(ActionKind::AppCommandPaletteOpen, params.page)?;
+    Ok(WorkspaceAction::OpenPalette {
+        mode: PaletteMode::Command,
+        source: PaletteSource::Keybinding,
+        query: params.query,
+    })
+}
+
+fn command_search_surface_action(
+    params: AppSurfaceParams,
+) -> Result<WorkspaceAction, ControlError> {
+    reject_surface_page(ActionKind::AppCommandSearchOpen, params.page)?;
+    let init_content = params
+        .query
+        .map(InitContent::Custom)
+        .unwrap_or(InitContent::FromInputBuffer);
+    Ok(WorkspaceAction::ShowCommandSearch(CommandSearchOptions {
+        filter: None,
+        init_content,
+    }))
+}
+
+fn no_params_surface_action(
+    action: ActionKind,
+    params: AppSurfaceParams,
+    workspace_action: WorkspaceAction,
+) -> Result<WorkspaceAction, ControlError> {
+    if params.query.is_some() || params.page.is_some() {
+        return Err(ControlError::new(
+            ErrorCode::InvalidParams,
+            format!(
+                "{} does not accept query or page parameters",
+                action.as_str()
+            ),
+        ));
+    }
+    Ok(workspace_action)
+}
+
+fn reject_surface_page(action: ActionKind, page: Option<String>) -> Result<(), ControlError> {
+    if page.is_some() {
+        return Err(ControlError::new(
+            ErrorCode::InvalidParams,
+            format!("{} does not accept a page parameter", action.as_str()),
+        ));
+    }
+    Ok(())
+}
+
+fn settings_section_from_param(page: &str) -> Result<SettingsSection, ControlError> {
+    let normalized = page.replace(['-', '_'], " ");
+    let mut words = normalized.split_whitespace();
+    let title_case = words.try_fold(String::new(), |mut output, word| {
+        if !output.is_empty() {
+            output.push(' ');
+        }
+        let mut chars = word.chars();
+        if let Some(first) = chars.next() {
+            output.extend(first.to_uppercase());
+            output.push_str(&chars.as_str().to_lowercase());
+        }
+        Some(output)
+    });
+    let mut candidates = vec![page.to_owned(), normalized];
+    if let Some(title_case) = title_case {
+        candidates.push(title_case);
+    }
+    candidates
+        .iter()
+        .find_map(|candidate| <SettingsSection as std::str::FromStr>::from_str(candidate).ok())
+        .ok_or_else(|| {
+            ControlError::new(
+                ErrorCode::InvalidParams,
+                format!("unknown settings page {page}"),
+            )
+        })
+}
 fn select_window_ids(
     target: &TargetSelector,
     force_active_default: bool,

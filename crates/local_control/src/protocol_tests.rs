@@ -267,6 +267,47 @@ fn tab_create_metadata_is_first_slice_logged_out_safe_mutation() {
 }
 
 #[test]
+fn owned_app_state_actions_are_implemented_authenticated_mutations() {
+    for action in [
+        ActionKind::AppFocus,
+        ActionKind::AppSettingsOpen,
+        ActionKind::AppCommandPaletteOpen,
+        ActionKind::AppCommandSearchOpen,
+        ActionKind::AppWarpDriveOpen,
+        ActionKind::AppWarpDriveToggle,
+        ActionKind::AppResourceCenterToggle,
+        ActionKind::AppAiAssistantToggle,
+        ActionKind::AppCodeReviewToggle,
+        ActionKind::AppVerticalTabsToggle,
+        ActionKind::WindowCreate,
+        ActionKind::WindowFocus,
+        ActionKind::WindowClose,
+    ] {
+        let metadata = action.metadata();
+        assert_eq!(
+            metadata.implementation_status,
+            ActionImplementationStatus::Implemented
+        );
+        assert_eq!(
+            metadata.state_data_category,
+            StateDataCategory::AppStateMutation
+        );
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::MutateAppState
+        );
+        assert!(metadata.authenticated_user.required);
+        assert_eq!(
+            metadata.allowed_invocation_contexts,
+            vec![
+                InvocationContext::InsideWarp,
+                InvocationContext::OutsideWarp
+            ]
+        );
+    }
+}
+
+#[test]
 fn core_smoke_metadata_has_explicit_read_metadata_category() {
     for action in [
         ActionKind::InstanceList,
@@ -340,11 +381,8 @@ fn default_permissions_preserve_security_categories() {
 }
 
 #[test]
-fn mutating_contract_actions_are_allowlisted_stubs_except_tab_create() {
+fn mutating_contract_actions_are_allowlisted_stubs_except_implemented_app_state_actions() {
     for action in [
-        ActionKind::WindowCreate,
-        ActionKind::WindowFocus,
-        ActionKind::WindowClose,
         ActionKind::TabActivate,
         ActionKind::TabMove,
         ActionKind::TabRename,
@@ -459,7 +497,7 @@ fn mutating_contract_preserves_distinct_permission_categories() {
 }
 #[test]
 fn non_first_slice_actions_are_catalog_stubs() {
-    let metadata = ActionKind::WindowCreate.metadata();
+    let metadata = ActionKind::TabActivate.metadata();
     assert_eq!(
         metadata.implementation_status,
         ActionImplementationStatus::Stub
