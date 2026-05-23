@@ -168,11 +168,14 @@ pub(super) fn run_session_command(
     }
 }
 
-pub(super) fn run_block_command(command: BlockCommand) -> Result<(), ControlError> {
+pub(super) fn run_block_command(
+    command: BlockCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
     match command {
-        BlockCommand::List(_) => unsupported_action("block.list"),
-        BlockCommand::Inspect(_) => unsupported_action("block.inspect"),
-        BlockCommand::Output(_) => unsupported_action("block.output"),
+        BlockCommand::List(args) => run_action(args.target, ActionKind::BlockList, json!({ "limit": args.limit }), output_format),
+        BlockCommand::Inspect(args) => run_action(args, ActionKind::BlockInspect, json!({}), output_format),
+        BlockCommand::Output(args) => run_action(args.target, ActionKind::BlockOutput, json!({ "format": block_output_format(args.plain, args.ansi, args.json) }), output_format),
     }
 }
 
@@ -181,7 +184,7 @@ pub(super) fn run_input_command(
     output_format: OutputFormat,
 ) -> Result<(), ControlError> {
     match command {
-        InputCommand::Get(_) => unsupported_action("input.get"),
+        InputCommand::Get(args) => run_action(args, ActionKind::InputGet, json!({}), output_format),
         InputCommand::Insert(args) => run_action(
             args.target,
             ActionKind::InputInsert,
@@ -201,9 +204,12 @@ pub(super) fn run_input_command(
     }
 }
 
-pub(super) fn run_history_command(command: HistoryCommand) -> Result<(), ControlError> {
+pub(super) fn run_history_command(
+    command: HistoryCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
     match command {
-        HistoryCommand::List(_) => unsupported_action("history.list"),
+        HistoryCommand::List(args) => run_action(args.target, ActionKind::HistoryList, json!({ "limit": args.limit }), output_format),
     }
 }
 
@@ -337,6 +343,19 @@ pub(super) fn run_auth_command(command: AuthCommand) -> Result<(), ControlError>
         AuthCommand::Status(_) => unsupported_action("auth.status"),
         AuthCommand::Login(_) => unsupported_action("auth.login"),
         AuthCommand::ApiKey(_) => unsupported_action("auth.api-key"),
+    }
+}
+
+
+fn block_output_format(plain: bool, ansi: bool, json: bool) -> &'static str {
+    if ansi {
+        "ansi"
+    } else if json {
+        "json"
+    } else if plain {
+        "plain"
+    } else {
+        "plain"
     }
 }
 

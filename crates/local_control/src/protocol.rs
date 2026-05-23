@@ -285,6 +285,70 @@ pub struct ActiveTargetChain {
     pub session_id: Option<String>,
 }
 
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockOutputParams {
+    #[serde(default)]
+    pub format: BlockOutputFormat,
+}
+
+impl Default for BlockOutputFormat {
+    fn default() -> Self {
+        Self::Plain
+    }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryListParams {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub limit: Option<u32>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockSummary {
+    pub block_id: String,
+    pub session_id: String,
+    pub index: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockListResult {
+    pub blocks: Vec<BlockSummary>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BlockOutputResult {
+    pub block: BlockSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub output: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputStateResult {
+    pub session_id: String,
+    pub text: String,
+    pub cursor_offset: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryEntrySummary {
+    pub entry_id: String,
+    pub command: String,
+    pub cwd: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HistoryListResult {
+    pub entries: Vec<HistoryEntrySummary>,
+}
+
 impl Action {
     pub fn new(kind: ActionKind) -> Self {
         Self {

@@ -562,7 +562,12 @@ impl ActionKind {
             | Self::SessionList
             | Self::SessionInspect
             | Self::ActionList
-            | Self::ActionInspect => ActionImplementationStatus::Implemented,
+            | Self::ActionInspect
+            | Self::BlockList
+            | Self::BlockInspect
+            | Self::BlockOutput
+            | Self::InputGet
+            | Self::HistoryList => ActionImplementationStatus::Implemented,
             Self::AppFocus
             | Self::AuthStatus
             | Self::AuthLogin
@@ -592,16 +597,11 @@ impl ActionKind {
             | Self::SessionPrevious
             | Self::SessionNext
             | Self::SessionReopenClosed
-            | Self::BlockList
-            | Self::BlockInspect
-            | Self::BlockOutput
-            | Self::InputGet
             | Self::InputInsert
             | Self::InputReplace
             | Self::InputClear
             | Self::InputModeSet
             | Self::InputRun
-            | Self::HistoryList
             | Self::ThemeList
             | Self::ThemeGet
             | Self::ThemeSet

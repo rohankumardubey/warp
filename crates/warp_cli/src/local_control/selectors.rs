@@ -1,7 +1,7 @@
 //! CLI argument conversion into shared local-control selectors.
 use local_control::protocol::{
-    ControlError, ErrorCode, PaneSelector, PaneTarget, SessionSelector, SessionTarget, TabSelector, TabTarget,
-    TargetSelector, WindowSelector, WindowTarget,
+    ControlError, ErrorCode, BlockSelector, BlockTarget, PaneSelector, PaneTarget, SessionSelector, SessionTarget,
+    TabSelector, TabTarget, TargetSelector, WindowSelector, WindowTarget,
 };
 use local_control::selection::InstanceSelector;
 
@@ -23,6 +23,7 @@ pub(super) fn target_selector(args: TargetArgs) -> Result<TargetSelector, Contro
         tab: tab_target(&args)?,
         pane: pane_target(&args)?,
         session: session_target(&args)?,
+        block: block_target(&args)?,
         ..TargetSelector::default()
     })
 }
@@ -98,6 +99,22 @@ fn session_target(args: &TargetArgs) -> Result<Option<SessionTarget>, ControlErr
     Ok(None)
 }
 
+
+fn block_target(args: &TargetArgs) -> Result<Option<BlockTarget>, ControlError> {
+    if let Some(selector) = args.block.as_deref() {
+        return parse_block_selector(selector).map(Some);
+    }
+    if let Some(id) = args.block_id.as_ref() {
+        return Ok(Some(BlockTarget::Id {
+            id: BlockSelector(id.clone()),
+        }));
+    }
+    if let Some(index) = args.block_index {
+        return Ok(Some(BlockTarget::Index { index }));
+    }
+    Ok(None)
+}
+
 fn parse_window_selector(selector: &str) -> Result<WindowTarget, ControlError> {
     if selector == "active" {
         return Ok(WindowTarget::Active);
@@ -167,6 +184,22 @@ fn parse_session_selector(selector: &str) -> Result<SessionTarget, ControlError>
         return parse_index(index).map(|index| SessionTarget::Index { index });
     }
     Err(invalid_selector("session", selector))
+}
+
+
+fn parse_block_selector(selector: &str) -> Result<BlockTarget, ControlError> {
+    if selector == "active" {
+        return Ok(BlockTarget::Active);
+    }
+    if let Some(id) = selector.strip_prefix("id:") {
+        return Ok(BlockTarget::Id {
+            id: BlockSelector(id.to_owned()),
+        });
+    }
+    if let Some(index) = selector.strip_prefix("index:") {
+        return parse_index(index).map(|index| BlockTarget::Index { index });
+    }
+    Err(invalid_selector("block", selector))
 }
 
 fn parse_index(index: &str) -> Result<u32, ControlError> {
