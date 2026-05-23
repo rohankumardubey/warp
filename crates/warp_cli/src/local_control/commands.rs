@@ -11,8 +11,9 @@ use crate::agent::OutputFormat;
 use crate::local_control::output::{write_json, write_json_line};
 use crate::local_control::selectors::instance_selector;
 use crate::local_control::{
-    ActionCommand, AppCommand, BlockCommand, HistoryCommand, InputCommand, InstanceCommand,
-    PaneCommand, SessionCommand, TabCommand, TargetArgs, WindowCommand,
+    ActionCommand, AppCommand, AppearanceCommand, BlockCommand, HistoryCommand, InputCommand,
+    InstanceCommand, PaneCommand, SessionCommand, SettingCommand, TabCommand, TargetArgs,
+    ThemeCommand, WindowCommand,
 };
 
 /// Display-oriented projection of a discoverable Warp instance.
@@ -210,6 +211,31 @@ pub(super) fn run_input_command(
     }
 }
 
+pub(super) fn run_theme_command(
+    command: ThemeCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        ThemeCommand::List(args) => {
+            run_action_with_params(args, ActionKind::ThemeList, EmptyParams {}, output_format)
+        }
+    }
+}
+
+pub(super) fn run_appearance_command(
+    command: AppearanceCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        AppearanceCommand::Get(args) => run_action_with_params(
+            args,
+            ActionKind::AppearanceGet,
+            EmptyParams {},
+            output_format,
+        ),
+    }
+}
+
 pub(super) fn run_history_command(
     command: HistoryCommand,
     output_format: OutputFormat,
@@ -219,6 +245,25 @@ pub(super) fn run_history_command(
             args.target,
             ActionKind::HistoryList,
             local_control::HistoryListParams { limit: args.limit },
+            output_format,
+        ),
+    }
+}
+pub(super) fn run_setting_command(
+    command: SettingCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        SettingCommand::List(args) => run_action_with_params(
+            args,
+            ActionKind::SettingList,
+            local_control::SettingListParams::default(),
+            output_format,
+        ),
+        SettingCommand::Get(args) => run_action_with_params(
+            args.target,
+            ActionKind::SettingGet,
+            local_control::SettingGetParams { key: args.key },
             output_format,
         ),
     }

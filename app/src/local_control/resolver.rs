@@ -2,7 +2,7 @@
 use crate::local_control::handlers::metadata::action_metadata_for_name;
 use ::local_control::protocol::{
     ActionGetParams, BlockGetParams, BlockListParams, HistoryListParams, PaneTarget, SessionTarget,
-    TabTarget, TargetSelector, WindowTarget,
+    SettingGetParams, TabTarget, TargetSelector, WindowTarget,
 };
 use ::local_control::{ActionKind, ControlError, ErrorCode};
 use warpui::ModelContext;
@@ -73,6 +73,7 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
             action_metadata_for_name(&params.action)?;
             Ok(())
         }
+        ActionKind::SettingGet => action.params_as::<SettingGetParams>().map(|_| ()),
         ActionKind::AppPing
         | ActionKind::AppInspect
         | ActionKind::AppVersion
@@ -83,7 +84,10 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
         | ActionKind::TabCreate
         | ActionKind::PaneList
         | ActionKind::SessionList
-        | ActionKind::InputGet => validate_empty_action_params(action),
+        | ActionKind::InputGet
+        | ActionKind::ThemeList
+        | ActionKind::AppearanceGet
+        | ActionKind::SettingList => validate_empty_action_params(action),
         ActionKind::BlockList => action.params_as::<BlockListParams>().map(|_| ()),
         ActionKind::BlockGet => action.params_as::<BlockGetParams>().and_then(|params| {
             if params.block_id.is_empty() {

@@ -25,10 +25,12 @@ pub use discovery::{
 pub use protocol::{
     Action, ActionGetParams, ActionGetResult, ActionListParams, ActionListResult,
     ActiveTargetChain, AppActiveParams, AppInspectParams, AppInspectResult, AppVersionResult,
-    BlockGetParams, BlockGetResult, BlockListParams, BlockListResult, BlockSummary, ControlError,
-    ControlResponse, EmptyParams, ErrorCode, ErrorResponseEnvelope, ExecutionContextProof,
-    HistoryEntrySummary, HistoryListParams, HistoryListResult, InputGetParams, InputStateResult,
-    PROTOCOL_VERSION, PaneListResult, PaneSummary, RequestEnvelope, ResponseEnvelope,
-    SessionListResult, SessionSummary, TabListResult, TabSummary, WindowListResult, WindowSummary,
+    AppearanceStateResult, BlockGetParams, BlockGetResult, BlockListParams, BlockListResult,
+    BlockSummary, ControlError, ControlResponse, EmptyParams, ErrorCode, ErrorResponseEnvelope,
+    ExecutionContextProof, HistoryEntrySummary, HistoryListParams, HistoryListResult,
+    InputGetParams, InputStateResult, PROTOCOL_VERSION, PaneListResult, PaneSummary,
+    RequestEnvelope, ResponseEnvelope, SessionListResult, SessionSummary, SettingGetParams,
+    SettingGetResult, SettingListParams, SettingListResult, SettingSummary, TabListResult,
+    TabSummary, ThemeListResult, ThemeSummary, WindowListResult, WindowSummary,
 };
 pub use selectors::{PaneSelector, SessionSelector, TabSelector, TargetSelector, WindowSelector};

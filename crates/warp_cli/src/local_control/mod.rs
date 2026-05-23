@@ -11,8 +11,9 @@ use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use clap_complete::aot::Shell;
 
 use commands::{
-    run_action_command, run_app_command, run_block_command, run_history_command, run_input_command,
-    run_instance_command, run_pane_command, run_session_command, run_tab_command,
+    run_action_command, run_app_command, run_appearance_command, run_block_command,
+    run_history_command, run_input_command, run_instance_command, run_pane_command,
+    run_session_command, run_setting_command, run_tab_command, run_theme_command,
     run_window_command,
 };
 use completions::generate_completions_to_stdout;
@@ -104,6 +105,17 @@ pub enum ControlCommand {
     /// Inspect terminal command history.
     #[command(subcommand)]
     History(HistoryCommand),
+    /// Inspect Warp themes.
+    #[command(subcommand)]
+    Theme(ThemeCommand),
+
+    /// Inspect appearance state.
+    #[command(subcommand)]
+    Appearance(AppearanceCommand),
+
+    /// Inspect allowlisted settings.
+    #[command(subcommand)]
+    Setting(SettingCommand),
 
     /// Generate shell completions for your shell to stdout.
     ///
@@ -205,11 +217,35 @@ pub enum InputCommand {
     Get(TargetArgs),
 }
 
+/// Commands that inspect Warp themes.
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum ThemeCommand {
+    /// List available themes.
+    List(TargetArgs),
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum AppearanceCommand {
+    /// Read appearance state.
+    Get(TargetArgs),
+}
+
 #[derive(Debug, Clone, Subcommand)]
 pub enum HistoryCommand {
     /// List command history entries.
     List(LimitTargetArgs),
 }
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum SettingCommand {
+    /// List allowlisted settings.
+    List(TargetArgs),
+
+    /// Read one allowlisted setting.
+    Get(SettingGetArgs),
+}
+
 /// Common flags for selecting which running Warp instance receives a command.
 #[derive(Debug, Clone, Args, Default)]
 pub struct TargetArgs {
@@ -250,6 +286,15 @@ pub struct BlockGetArgs {
     pub block_id: String,
 }
 
+#[derive(Debug, Clone, Args)]
+pub struct SettingGetArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Allowlisted setting key.
+    pub key: String,
+}
+
 pub fn run(args: ControlArgs) -> ExitCode {
     let output_format = args.output_format;
     match run_inner(args) {
@@ -279,6 +324,9 @@ fn run_inner(args: ControlArgs) -> Result<(), local_control::protocol::ControlEr
         ControlCommand::Block(command) => run_block_command(command, output_format),
         ControlCommand::Input(command) => run_input_command(command, output_format),
         ControlCommand::History(command) => run_history_command(command, output_format),
+        ControlCommand::Theme(command) => run_theme_command(command, output_format),
+        ControlCommand::Appearance(command) => run_appearance_command(command, output_format),
+        ControlCommand::Setting(command) => run_setting_command(command, output_format),
         ControlCommand::Completions { shell } => generate_completions_to_stdout(shell),
     }
 }

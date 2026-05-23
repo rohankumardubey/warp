@@ -352,7 +352,11 @@ impl ActionKind {
             | Self::BlockList
             | Self::BlockGet
             | Self::InputGet
-            | Self::HistoryList => ActionImplementationStatus::Implemented,
+            | Self::HistoryList
+            | Self::ThemeList
+            | Self::AppearanceGet
+            | Self::SettingGet
+            | Self::SettingList => ActionImplementationStatus::Implemented,
             _ => ActionImplementationStatus::Stub,
         };
         let requires_authenticated_user = self.default_requires_authenticated_user();
@@ -535,7 +539,11 @@ impl ActionKind {
             | Self::TabList
             | Self::TabCreate
             | Self::PaneList
-            | Self::SessionList => false,
+            | Self::SessionList
+            | Self::ThemeList
+            | Self::AppearanceGet
+            | Self::SettingGet
+            | Self::SettingList => false,
             _ => true,
         }
     }
