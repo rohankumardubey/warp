@@ -84,7 +84,7 @@ pub(super) fn run_app_command(
         AppCommand::Version(args) => {
             run_action(args, ActionKind::AppVersion, json!({}), output_format)
         }
-        AppCommand::Active(_) => unsupported_action("app.active"),
+        AppCommand::Active(args) => run_action(args, ActionKind::AppActive, json!({}), output_format),
         AppCommand::Focus(_) => unsupported_action("app.focus"),
     }
 }
@@ -109,7 +109,7 @@ pub(super) fn run_window_command(
         WindowCommand::List(args) => {
             run_action(args, ActionKind::WindowList, json!({}), output_format)
         }
-        WindowCommand::Inspect(_) => unsupported_action("window.inspect"),
+        WindowCommand::Inspect(args) => run_action(args, ActionKind::WindowInspect, json!({}), output_format),
         WindowCommand::Create(_) => unsupported_action("window.create"),
         WindowCommand::Focus(_) => unsupported_action("window.focus"),
         WindowCommand::Close(_) => unsupported_action("window.close"),
@@ -122,7 +122,7 @@ pub(super) fn run_tab_command(
 ) -> Result<(), ControlError> {
     match command {
         TabCommand::List(args) => run_action(args, ActionKind::TabList, json!({}), output_format),
-        TabCommand::Inspect(_) => unsupported_action("tab.inspect"),
+        TabCommand::Inspect(args) => run_action(args, ActionKind::TabInspect, json!({}), output_format),
         TabCommand::Create(args) => run_tab_create(args, output_format),
         TabCommand::Activate(_) => unsupported_action("tab.activate"),
         TabCommand::Move(_) => unsupported_action("tab.move"),
@@ -139,7 +139,7 @@ pub(super) fn run_pane_command(
 ) -> Result<(), ControlError> {
     match command {
         PaneCommand::List(args) => run_action(args, ActionKind::PaneList, json!({}), output_format),
-        PaneCommand::Inspect(_) => unsupported_action("pane.inspect"),
+        PaneCommand::Inspect(args) => run_action(args, ActionKind::PaneInspect, json!({}), output_format),
         PaneCommand::Split(_) => unsupported_action("pane.split"),
         PaneCommand::Focus(_) => unsupported_action("pane.focus"),
         PaneCommand::Navigate(_) => unsupported_action("pane.navigate"),
@@ -160,7 +160,7 @@ pub(super) fn run_session_command(
         SessionCommand::List(args) => {
             run_action(args, ActionKind::SessionList, json!({}), output_format)
         }
-        SessionCommand::Inspect(_) => unsupported_action("session.inspect"),
+        SessionCommand::Inspect(args) => run_action(args, ActionKind::SessionInspect, json!({}), output_format),
         SessionCommand::Activate(_) => unsupported_action("session.activate"),
         SessionCommand::Previous(_) => unsupported_action("session.previous"),
         SessionCommand::Next(_) => unsupported_action("session.next"),
@@ -373,11 +373,9 @@ fn run_action(
     });
     request.target = target_selector(args)?;
     let response = local_control::client::send_request(&instance, &request)?;
-    let local_control::protocol::ControlResponse::Ok { data } = response.response else {
-        return Err(ControlError::new(
-            ErrorCode::Internal,
-            "local-control request failed without an error payload",
-        ));
+    let data = match response.response {
+        local_control::protocol::ControlResponse::Ok { data } => data,
+        local_control::protocol::ControlResponse::Error { error } => return Err(error),
     };
     write_value(&data, output_format)
 }

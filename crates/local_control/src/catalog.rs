@@ -545,26 +545,33 @@ impl ActionKind {
 
     fn implementation_status(self) -> ActionImplementationStatus {
         match self {
-            Self::InstanceList | Self::AppPing | Self::AppVersion | Self::TabCreate => {
-                ActionImplementationStatus::Implemented
-            }
-            Self::InstanceInspect
+            Self::InstanceList
+            | Self::InstanceInspect
+            | Self::AppPing
+            | Self::AppVersion
             | Self::AppActive
-            | Self::AppFocus
+            | Self::CapabilityList
+            | Self::CapabilityInspect
+            | Self::WindowList
+            | Self::WindowInspect
+            | Self::TabList
+            | Self::TabInspect
+            | Self::TabCreate
+            | Self::PaneList
+            | Self::PaneInspect
+            | Self::SessionList
+            | Self::SessionInspect
+            | Self::ActionList
+            | Self::ActionInspect => ActionImplementationStatus::Implemented,
+            Self::AppFocus
             | Self::AuthStatus
             | Self::AuthLogin
             | Self::AuthApiKeySet
             | Self::AuthApiKeyStatus
             | Self::AuthApiKeyRevoke
-            | Self::CapabilityList
-            | Self::CapabilityInspect
-            | Self::WindowList
-            | Self::WindowInspect
             | Self::WindowCreate
             | Self::WindowFocus
             | Self::WindowClose
-            | Self::TabList
-            | Self::TabInspect
             | Self::TabActivate
             | Self::TabMove
             | Self::TabClose
@@ -572,8 +579,6 @@ impl ActionKind {
             | Self::TabResetName
             | Self::TabColorSet
             | Self::TabColorClear
-            | Self::PaneList
-            | Self::PaneInspect
             | Self::PaneSplit
             | Self::PaneFocus
             | Self::PaneNavigate
@@ -583,8 +588,6 @@ impl ActionKind {
             | Self::PaneClose
             | Self::PaneRename
             | Self::PaneResetName
-            | Self::SessionList
-            | Self::SessionInspect
             | Self::SessionActivate
             | Self::SessionPrevious
             | Self::SessionNext
@@ -618,8 +621,6 @@ impl ActionKind {
             | Self::SettingToggle
             | Self::KeybindingList
             | Self::KeybindingGet
-            | Self::ActionList
-            | Self::ActionInspect
             | Self::SurfaceSettingsOpen
             | Self::SurfaceCommandPaletteOpen
             | Self::SurfaceCommandSearchOpen
@@ -652,15 +653,13 @@ impl ActionKind {
     }
 
     fn allowed_invocation_contexts(self) -> Vec<InvocationContext> {
-        match self {
-            Self::InstanceList | Self::AppPing | Self::AppVersion | Self::TabCreate => {
-                vec![InvocationContext::OutsideWarp]
-            }
-            _ => vec![
-                InvocationContext::InsideWarp,
-                InvocationContext::OutsideWarp,
-            ],
+        if self.is_implemented() {
+            return vec![InvocationContext::OutsideWarp];
         }
+        vec![
+            InvocationContext::InsideWarp,
+            InvocationContext::OutsideWarp,
+        ]
     }
 
     fn requires_authenticated_user(self) -> bool {

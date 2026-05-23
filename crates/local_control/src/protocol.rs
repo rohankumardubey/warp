@@ -1,4 +1,5 @@
 //! Wire protocol envelopes and error types for Warp local control.
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -265,12 +266,54 @@ pub struct Action {
     pub params: serde_json::Value,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActionGetParams {
+    pub action: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ActiveTargetChain {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tab_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pane_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
 impl Action {
     pub fn new(kind: ActionKind) -> Self {
         Self {
             kind,
             params: serde_json::Value::Object(Default::default()),
         }
+    }
+
+    pub fn with_params<T: Serialize>(kind: ActionKind, params: T) -> Result<Self, ControlError> {
+        Ok(Self {
+            kind,
+            params: serde_json::to_value(params).map_err(|err| {
+                ControlError::with_details(
+                    ErrorCode::InvalidParams,
+                    format!("failed to serialize {} parameters", kind.as_str()),
+                    err.to_string(),
+                )
+            })?,
+        })
+    }
+
+    pub fn params_as<T: DeserializeOwned>(&self) -> Result<T, ControlError> {
+        serde_json::from_value(self.params.clone()).map_err(|err| {
+            ControlError::with_details(
+                ErrorCode::InvalidParams,
+                format!("failed to decode {} parameters", self.kind.as_str()),
+                err.to_string(),
+            )
+        })
     }
 }
 

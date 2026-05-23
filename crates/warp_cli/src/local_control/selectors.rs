@@ -1,7 +1,7 @@
 //! CLI argument conversion into shared local-control selectors.
 use local_control::protocol::{
-    ControlError, ErrorCode, PaneSelector, PaneTarget, TabSelector, TabTarget, TargetSelector,
-    WindowSelector, WindowTarget,
+    ControlError, ErrorCode, PaneSelector, PaneTarget, SessionSelector, SessionTarget, TabSelector, TabTarget,
+    TargetSelector, WindowSelector, WindowTarget,
 };
 use local_control::selection::InstanceSelector;
 
@@ -22,6 +22,8 @@ pub(super) fn target_selector(args: TargetArgs) -> Result<TargetSelector, Contro
         window: window_target(&args)?,
         tab: tab_target(&args)?,
         pane: pane_target(&args)?,
+        session: session_target(&args)?,
+        ..TargetSelector::default()
     })
 }
 
@@ -80,6 +82,22 @@ fn pane_target(args: &TargetArgs) -> Result<Option<PaneTarget>, ControlError> {
     Ok(None)
 }
 
+
+fn session_target(args: &TargetArgs) -> Result<Option<SessionTarget>, ControlError> {
+    if let Some(selector) = args.session.as_deref() {
+        return parse_session_selector(selector).map(Some);
+    }
+    if let Some(id) = args.session_id.as_ref() {
+        return Ok(Some(SessionTarget::Id {
+            id: SessionSelector(id.clone()),
+        }));
+    }
+    if let Some(index) = args.session_index {
+        return Ok(Some(SessionTarget::Index { index }));
+    }
+    Ok(None)
+}
+
 fn parse_window_selector(selector: &str) -> Result<WindowTarget, ControlError> {
     if selector == "active" {
         return Ok(WindowTarget::Active);
@@ -133,6 +151,22 @@ fn parse_pane_selector(selector: &str) -> Result<PaneTarget, ControlError> {
         return parse_index(index).map(|index| PaneTarget::Index { index });
     }
     Err(invalid_selector("pane", selector))
+}
+
+
+fn parse_session_selector(selector: &str) -> Result<SessionTarget, ControlError> {
+    if selector == "active" {
+        return Ok(SessionTarget::Active);
+    }
+    if let Some(id) = selector.strip_prefix("id:") {
+        return Ok(SessionTarget::Id {
+            id: SessionSelector(id.to_owned()),
+        });
+    }
+    if let Some(index) = selector.strip_prefix("index:") {
+        return parse_index(index).map(|index| SessionTarget::Index { index });
+    }
+    Err(invalid_selector("session", selector))
 }
 
 fn parse_index(index: &str) -> Result<u32, ControlError> {
