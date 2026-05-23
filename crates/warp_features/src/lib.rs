@@ -817,6 +817,9 @@ pub enum FeatureFlag {
     /// Enables conversation retrieval via the CLI (oz run conversation get, oz run get --conversation).
     ConversationApi,
 
+    /// Gates the local Warp Control CLI (`warpctrl`) settings, discovery, and app bridge.
+    WarpControlCli,
+
     /// Guided onboarding flow for existing users introducing HOA features
     /// (vertical tabs, agent inbox, tab configs).
     HOAOnboardingFlow,
@@ -942,6 +945,7 @@ pub const DOGFOOD_FLAGS: &[FeatureFlag] = &[
     FeatureFlag::DragTabsToWindows,
     FeatureFlag::RemoteCodebaseIndexing,
     FeatureFlag::RemoteCodeReview,
+    FeatureFlag::WarpControlCli,
 ];
 
 /// Features enabled for feature preview build users (e.g.: Friends of Warp).

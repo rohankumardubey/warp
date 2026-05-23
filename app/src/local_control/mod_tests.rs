@@ -2,7 +2,7 @@ use ::local_control::protocol::{
     PaneSelector, PaneTarget, TabSelector, TabTarget, TargetSelector, WindowSelector, WindowTarget,
 };
 
-use super::{capabilities, preferred_window_id, validate_tab_create_target};
+use super::{active_window_id, capabilities, validate_tab_create_target};
 use ::local_control::protocol::ActionKind;
 use ::local_control::ErrorCode;
 
@@ -52,24 +52,26 @@ fn tab_create_rejects_concrete_targets() {
 }
 
 #[test]
-fn capabilities_only_advertises_tab_create() {
-    assert_eq!(capabilities(), vec![ActionKind::TabCreate]);
+fn capabilities_advertises_only_first_slice_core_actions() {
+    assert_eq!(
+        capabilities(),
+        vec![
+            ActionKind::InstanceList,
+            ActionKind::AppPing,
+            ActionKind::AppVersion,
+            ActionKind::TabCreate,
+        ]
+    );
 }
 
 #[test]
 fn tab_create_prefers_active_window() {
     let active = warpui::WindowId::from_usize(1);
-    let frontmost = warpui::WindowId::from_usize(2);
 
-    assert_eq!(
-        preferred_window_id(Some(active), Some(frontmost)),
-        Some(active)
-    );
+    assert_eq!(active_window_id(Some(active)), Some(active));
 }
 
 #[test]
-fn tab_create_falls_back_to_frontmost_window() {
-    let frontmost = warpui::WindowId::from_usize(2);
-
-    assert_eq!(preferred_window_id(None, Some(frontmost)), Some(frontmost));
+fn tab_create_does_not_fall_back_without_active_window() {
+    assert_eq!(active_window_id(None), None);
 }

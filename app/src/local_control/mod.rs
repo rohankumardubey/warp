@@ -12,7 +12,7 @@ use ::local_control::{
     ErrorResponseEnvelope, InstanceId, InstanceRecord, RegisteredInstance, RequestEnvelope,
     ResponseEnvelope, PROTOCOL_VERSION,
 };
-use ::local_control::{InvocationContext, LocalControlPermission};
+use ::local_control::{InvocationContext, PermissionCategory};
 use axum::extract::rejection::JsonRejection;
 use axum::extract::State;
 use axum::http::{HeaderMap, StatusCode};
@@ -22,6 +22,7 @@ use axum::{Json, Router};
 use chrono::Duration;
 use serde_json::json;
 use warp_core::channel::ChannelState;
+use warp_core::features::FeatureFlag;
 use warpui::{Entity, ModelContext, ModelSpawner, SingletonEntity, TypedActionView};
 
 use crate::workspace::{Workspace, WorkspaceAction};
@@ -46,6 +47,12 @@ impl SingletonEntity for LocalControlServer {}
 
 impl LocalControlServer {
     pub fn new(ctx: &mut ModelContext<Self>) -> Self {
+        if !FeatureFlag::WarpControlCli.is_enabled() {
+            return Self {
+                _runtime: None,
+                _registered_instance: None,
+            };
+        }
         match Self::start(ctx) {
             Ok(server) => server,
             Err(error) => {
@@ -89,8 +96,12 @@ impl LocalControlServer {
                 err.to_string(),
             )
         })?;
+        let outside_warp_control_enabled = LocalControlSettings::as_ref(ctx)
+            .is_context_enabled(LocalControlInvocationContext::OutsideWarp);
+        let endpoint =
+            outside_warp_control_enabled.then_some(ControlEndpoint::localhost(port.port()));
         let record = InstanceRecord::for_current_process(
-            ControlEndpoint::localhost(port.port()),
+            endpoint,
             ChannelState::channel().to_string(),
             ChannelState::app_id().to_string(),
             ChannelState::app_version().map(str::to_owned),
@@ -173,6 +184,30 @@ impl LocalControlBridge {
             );
         }
         match request.action.kind {
+            ActionKind::InstanceList => {
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                ResponseEnvelope::ok(request.request_id, self.instance_metadata())
+            }
+            ActionKind::AppPing => {
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                ResponseEnvelope::ok(request.request_id, self.ping_metadata())
+            }
+            ActionKind::AppVersion => {
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                ResponseEnvelope::ok(request.request_id, self.version_metadata())
+            }
             ActionKind::TabCreate => {
                 if let Err(error) =
                     ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
@@ -243,12 +278,55 @@ impl LocalControlBridge {
             },
         }))
     }
+
+    fn instance_metadata(&self) -> serde_json::Value {
+        json!({
+            "action": ActionKind::InstanceList.as_str(),
+            "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
+            "pid": std::process::id(),
+            "channel": ChannelState::channel().to_string(),
+            "app_id": ChannelState::app_id().to_string(),
+            "app_version": ChannelState::app_version(),
+            "protocol_version": PROTOCOL_VERSION,
+            "actions": ActionKind::implemented_metadata(),
+        })
+    }
+
+    fn ping_metadata(&self) -> serde_json::Value {
+        json!({
+            "action": ActionKind::AppPing.as_str(),
+            "ok": true,
+            "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
+            "protocol_version": PROTOCOL_VERSION,
+        })
+    }
+
+    fn version_metadata(&self) -> serde_json::Value {
+        json!({
+            "action": ActionKind::AppVersion.as_str(),
+            "instance_id": self.instance_id.as_ref().map(|id| id.0.as_str()),
+            "protocol_version": PROTOCOL_VERSION,
+            "channel": ChannelState::channel().to_string(),
+            "app_id": ChannelState::app_id().to_string(),
+            "app_version": ChannelState::app_version(),
+        })
+    }
 }
 
 async fn handle_credential_request(
     State(state): State<ControlServerState>,
     payload: Result<Json<CredentialRequest>, JsonRejection>,
 ) -> Response {
+    if !FeatureFlag::WarpControlCli.is_enabled() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::LocalControlDisabled,
+                "local control is disabled by feature flag",
+            ))),
+        )
+            .into_response();
+    }
     let request = match payload {
         Ok(Json(request)) => request,
         Err(err) => {
@@ -300,6 +378,13 @@ async fn handle_credential_request(
                     request.action.as_str()
                 ),
             ))),
+        )
+            .into_response();
+    }
+    if let Err(error) = request.verify_execution_context_proof() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponseEnvelope::new(error)),
         )
             .into_response();
     }
@@ -364,6 +449,16 @@ async fn handle_control_request(
     headers: HeaderMap,
     payload: Result<Json<RequestEnvelope>, JsonRejection>,
 ) -> Response {
+    if !FeatureFlag::WarpControlCli.is_enabled() {
+        return (
+            StatusCode::FORBIDDEN,
+            Json(ErrorResponseEnvelope::new(ControlError::new(
+                ErrorCode::LocalControlDisabled,
+                "local control is disabled by feature flag",
+            ))),
+        )
+            .into_response();
+    }
     let auth_header = headers
         .get(axum::http::header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok());
@@ -461,23 +556,16 @@ fn validate_tab_create_target(target: &TargetSelector) -> Result<(), ControlErro
 fn target_window_id(
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<warpui::WindowId, ControlError> {
-    preferred_window_id(
-        ctx.windows().active_window(),
-        ctx.windows().frontmost_window_id(),
-    )
-    .ok_or_else(|| {
+    active_window_id(ctx.windows().active_window()).ok_or_else(|| {
         ControlError::new(
             ErrorCode::MissingTarget,
-            "tab.create requires an active or previously active Warp window",
+            "tab.create requires an active Warp window",
         )
     })
 }
 
-fn preferred_window_id(
-    active_window: Option<warpui::WindowId>,
-    frontmost_window: Option<warpui::WindowId>,
-) -> Option<warpui::WindowId> {
-    active_window.or(frontmost_window)
+fn active_window_id(active_window: Option<warpui::WindowId>) -> Option<warpui::WindowId> {
+    active_window
 }
 
 #[cfg(test)]
@@ -495,10 +583,19 @@ fn local_invocation_context(context: InvocationContext) -> LocalControlInvocatio
     }
 }
 
-fn local_permission(permission: LocalControlPermission) -> LocalControlPermissionCategory {
+fn local_permission(permission: PermissionCategory) -> LocalControlPermissionCategory {
     match permission {
-        LocalControlPermission::ReadOnly => LocalControlPermissionCategory::ReadOnly,
-        LocalControlPermission::ReadWrite => LocalControlPermissionCategory::ReadWrite,
+        PermissionCategory::ReadMetadata => LocalControlPermissionCategory::MetadataReads,
+        PermissionCategory::ReadUnderlyingData => {
+            LocalControlPermissionCategory::UnderlyingDataReads
+        }
+        PermissionCategory::MutateAppState => LocalControlPermissionCategory::AppStateMutations,
+        PermissionCategory::MutateMetadataConfiguration => {
+            LocalControlPermissionCategory::MetadataConfigurationMutations
+        }
+        PermissionCategory::MutateUnderlyingData => {
+            LocalControlPermissionCategory::UnderlyingDataMutations
+        }
     }
 }
 
@@ -515,7 +612,7 @@ fn ensure_action_allowed(
             "local control is disabled for this invocation context",
         ));
     }
-    let permission = local_permission(action.metadata().permission);
+    let permission = local_permission(action.metadata().permission_category);
     if !settings.is_permission_enabled(context, permission) {
         return Err(ControlError::new(
             ErrorCode::InsufficientPermissions,

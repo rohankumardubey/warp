@@ -2,7 +2,9 @@ use std::io::Write as _;
 
 use anyhow::Context as _;
 use clap::{Args, Parser, Subcommand};
-use local_control::protocol::{Action, ActionKind, ControlResponse, RequestEnvelope};
+use local_control::protocol::{
+    Action, ActionKind, ActionMetadata, ControlResponse, RequestEnvelope,
+};
 use local_control::selection::{InstanceSelector, select_instance};
 use serde::Serialize;
 use serde_json::json;
@@ -35,6 +37,9 @@ pub enum ControlCommand {
     /// Inspect local Warp app instances.
     #[command(subcommand)]
     Instance(InstanceCommand),
+    /// Inspect a selected local Warp app.
+    #[command(subcommand)]
+    App(AppCommand),
 
     /// Control local Warp tabs.
     #[command(subcommand)]
@@ -45,6 +50,15 @@ pub enum ControlCommand {
 pub enum InstanceCommand {
     /// List locally discoverable Warp instances.
     List,
+}
+
+#[derive(Debug, Clone, Subcommand)]
+pub enum AppCommand {
+    /// Check that the selected local Warp app responds.
+    Ping(TargetArgs),
+
+    /// Print protocol and app version metadata for the selected local Warp app.
+    Version(TargetArgs),
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -72,8 +86,9 @@ struct InstanceSummary {
     app_id: String,
     app_version: Option<String>,
     started_at: String,
-    endpoint: local_control::discovery::ControlEndpoint,
-    actions: Vec<String>,
+    endpoint: Option<local_control::discovery::ControlEndpoint>,
+    outside_warp_control_enabled: bool,
+    actions: Vec<ActionMetadata>,
 }
 
 impl From<local_control::discovery::InstanceRecord> for InstanceSummary {
@@ -86,11 +101,8 @@ impl From<local_control::discovery::InstanceRecord> for InstanceSummary {
             app_version: record.app_version,
             started_at: record.started_at.to_rfc3339(),
             endpoint: record.endpoint,
-            actions: record
-                .actions
-                .into_iter()
-                .map(|metadata| metadata.name)
-                .collect(),
+            outside_warp_control_enabled: record.outside_warp_control_enabled,
+            actions: record.actions,
         }
     }
 }
@@ -99,6 +111,7 @@ pub fn run(args: ControlArgs) -> anyhow::Result<()> {
     let output_format = args.output_format;
     match args.command {
         ControlCommand::Instance(command) => run_instance_command(command, output_format),
+        ControlCommand::App(command) => run_app_command(command, output_format),
         ControlCommand::Tab(command) => run_tab_command(command, output_format),
     }
 }
@@ -123,18 +136,28 @@ fn run_instance_command(
                 }
                 OutputFormat::Pretty | OutputFormat::Text => {
                     for summary in summaries {
+                        let endpoint = summary
+                            .endpoint
+                            .as_ref()
+                            .map(|endpoint| format!("{}:{}", endpoint.host, endpoint.port))
+                            .unwrap_or_else(|| "outside_warp_disabled".to_owned());
                         println!(
-                            "{}\tpid={}\t{}\t{}:{}",
-                            summary.instance_id,
-                            summary.pid,
-                            summary.channel,
-                            summary.endpoint.host,
-                            summary.endpoint.port
+                            "{}\tpid={}\t{}\t{}",
+                            summary.instance_id, summary.pid, summary.channel, endpoint
                         );
                     }
                     Ok(())
                 }
             }
+        }
+    }
+}
+
+fn run_app_command(command: AppCommand, output_format: OutputFormat) -> anyhow::Result<()> {
+    match command {
+        AppCommand::Ping(args) => run_action(args, ActionKind::AppPing, json!({}), output_format),
+        AppCommand::Version(args) => {
+            run_action(args, ActionKind::AppVersion, json!({}), output_format)
         }
     }
 }
@@ -199,37 +222,5 @@ fn write_json_line(value: &impl Serialize) -> anyhow::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use clap::Parser as _;
-
-    use super::*;
-
-    #[test]
-    fn parses_first_slice_tab_create() {
-        let args =
-            ControlArgs::try_parse_from(["warpctrl", "tab", "create", "--instance", "inst_123"])
-                .expect("tab create parses");
-        let ControlCommand::Tab(TabCommand::Create(target)) = args.command else {
-            panic!("expected tab create command");
-        };
-        assert_eq!(target.instance.as_deref(), Some("inst_123"));
-    }
-
-    #[test]
-    fn parses_first_slice_instance_list() {
-        let args = ControlArgs::try_parse_from(["warpctrl", "instance", "list"])
-            .expect("instance list parses");
-        assert!(matches!(
-            args.command,
-            ControlCommand::Instance(InstanceCommand::List)
-        ));
-    }
-
-    #[test]
-    fn rejects_future_catalog_commands_not_in_first_slice() {
-        assert!(ControlArgs::try_parse_from(["warpctrl", "window", "list"]).is_err());
-        assert!(ControlArgs::try_parse_from(["warpctrl", "app", "ping"]).is_err());
-        assert!(ControlArgs::try_parse_from(["warpctrl", "tab", "list"]).is_err());
-        assert!(ControlArgs::try_parse_from(["warpctrl", "setting", "list"]).is_err());
-    }
-}
+#[path = "local_control_tests.rs"]
+mod tests;

@@ -6,7 +6,8 @@ use uuid::Uuid;
 
 use crate::discovery::InstanceId;
 use crate::protocol::{
-    ActionKind, ControlError, ErrorCode, ExecutionContextProof, InvocationContext, RiskTier,
+    ActionKind, ControlError, ErrorCode, ExecutionContextProof, InvocationContext,
+    PermissionCategory, RiskTier, StateDataCategory,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -79,6 +80,26 @@ impl CredentialRequest {
             execution_context_proof: None,
         }
     }
+
+    pub fn verify_execution_context_proof(&self) -> Result<(), ControlError> {
+        match (&self.invocation_context, &self.execution_context_proof) {
+            (InvocationContext::InsideWarp, _) => Err(ControlError::new(
+                ErrorCode::ExecutionContextNotAllowed,
+                "inside-Warp credentials require an app-issued verified Warp terminal proof",
+            )),
+            (
+                InvocationContext::OutsideWarp,
+                None | Some(ExecutionContextProof::ExternalClient),
+            ) => Ok(()),
+            (
+                InvocationContext::OutsideWarp,
+                Some(ExecutionContextProof::VerifiedWarpTerminal { .. }),
+            ) => Err(ControlError::new(
+                ErrorCode::ExecutionContextNotAllowed,
+                "external clients cannot use a Warp terminal execution proof",
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -99,10 +120,17 @@ pub struct CredentialGrant {
     pub instance_id: InstanceId,
     pub action: ActionKind,
     pub risk_tier: RiskTier,
+    pub state_data_category: StateDataCategory,
+    pub permission_category: PermissionCategory,
     pub invocation_context: InvocationContext,
-    pub authenticated_user_subject: Option<String>,
+    pub authenticated_user: AuthenticatedUserGrant,
     pub issued_at: DateTime<Utc>,
     pub expires_at: DateTime<Utc>,
+}
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthenticatedUserGrant {
+    pub required: bool,
+    pub subject: Option<String>,
 }
 
 impl CredentialGrant {
@@ -113,13 +141,19 @@ impl CredentialGrant {
         ttl: Duration,
     ) -> Self {
         let issued_at = Utc::now();
+        let metadata = action.metadata();
         Self {
             credential_id: format!("cred_{}", Uuid::new_v4().simple()),
             instance_id,
             action,
-            risk_tier: action.metadata().risk_tier,
+            risk_tier: metadata.risk_tier,
+            state_data_category: metadata.state_data_category,
+            permission_category: metadata.permission_category,
             invocation_context,
-            authenticated_user_subject: None,
+            authenticated_user: AuthenticatedUserGrant {
+                required: metadata.authenticated_user.required,
+                subject: None,
+            },
             issued_at,
             expires_at: issued_at + ttl,
         }
@@ -143,7 +177,19 @@ impl CredentialGrant {
             ));
         }
         let metadata = action.metadata();
-        if metadata.requires_authenticated_user && self.authenticated_user_subject.is_none() {
+        if self.risk_tier != metadata.risk_tier
+            || self.state_data_category != metadata.state_data_category
+            || self.permission_category != metadata.permission_category
+        {
+            return Err(ControlError::new(
+                ErrorCode::InsufficientPermissions,
+                format!(
+                    "credential grant metadata does not satisfy {}",
+                    action.as_str()
+                ),
+            ));
+        }
+        if metadata.requires_authenticated_user && self.authenticated_user.subject.is_none() {
             return Err(ControlError::new(
                 ErrorCode::AuthenticatedUserRequired,
                 format!("{} requires an authenticated Warp user", action.as_str()),
@@ -166,49 +212,5 @@ impl CredentialGrant {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rejects_missing_authorization_header() {
-        let token = AuthToken::from_secret("secret");
-        let err = token
-            .verify_authorization_header(None)
-            .expect_err("rejected");
-        assert_eq!(err.code, ErrorCode::UnauthorizedLocalClient);
-    }
-
-    #[test]
-    fn rejects_wrong_bearer_token() {
-        let token = AuthToken::from_secret("secret");
-        let err = token
-            .verify_authorization_header(Some("Bearer wrong"))
-            .expect_err("rejected");
-        assert_eq!(err.code, ErrorCode::UnauthorizedLocalClient);
-    }
-
-    #[test]
-    fn accepts_matching_bearer_token() {
-        let token = AuthToken::from_secret("secret");
-        token
-            .verify_authorization_header(Some("Bearer secret"))
-            .expect("accepted");
-    }
-
-    #[test]
-    fn scoped_credential_allows_only_granted_action() {
-        let grant = CredentialGrant::new(
-            InstanceId("inst_test".to_owned()),
-            ActionKind::TabCreate,
-            InvocationContext::OutsideWarp,
-            Duration::minutes(5),
-        );
-        grant
-            .verify_for_action(ActionKind::TabCreate)
-            .expect("tab.create grant is accepted");
-        let err = grant
-            .verify_for_action(ActionKind::WindowCreate)
-            .expect_err("other actions are rejected");
-        assert_eq!(err.code, ErrorCode::InsufficientPermissions);
-    }
-}
+#[path = "auth_tests.rs"]
+mod tests;

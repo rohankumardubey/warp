@@ -62,19 +62,23 @@ pub struct InstanceRecord {
     pub app_version: Option<String>,
     pub started_at: DateTime<Utc>,
     pub executable_path: Option<PathBuf>,
-    pub endpoint: ControlEndpoint,
-    pub credential_broker: CredentialBrokerReference,
+    pub endpoint: Option<ControlEndpoint>,
+    pub credential_broker: Option<CredentialBrokerReference>,
+    pub outside_warp_control_enabled: bool,
     pub actions: Vec<ActionMetadata>,
 }
 
 impl InstanceRecord {
     pub fn for_current_process(
-        endpoint: ControlEndpoint,
+        endpoint: Option<ControlEndpoint>,
         channel: impl Into<String>,
         app_id: impl Into<String>,
         app_version: Option<String>,
         actions: Vec<ActionMetadata>,
     ) -> Self {
+        let credential_broker = endpoint
+            .clone()
+            .map(|endpoint| CredentialBrokerReference { endpoint });
         Self {
             protocol_version: PROTOCOL_VERSION,
             instance_id: InstanceId::new(),
@@ -84,9 +88,8 @@ impl InstanceRecord {
             app_version,
             started_at: Utc::now(),
             executable_path: std::env::current_exe().ok(),
-            credential_broker: CredentialBrokerReference {
-                endpoint: endpoint.clone(),
-            },
+            outside_warp_control_enabled: endpoint.is_some(),
+            credential_broker,
             endpoint,
             actions,
         }
@@ -221,7 +224,7 @@ mod tests {
     fn registered_instance_round_trips_discovery_record() {
         let dir = tempfile::tempdir().expect("temp dir");
         let record = InstanceRecord::for_current_process(
-            ControlEndpoint::localhost(4000),
+            Some(ControlEndpoint::localhost(4000)),
             "local",
             "dev.warp.WarpLocal",
             Some("test".to_owned()),
@@ -237,7 +240,7 @@ mod tests {
     fn serialized_discovery_record_does_not_contain_raw_credential_material() {
         let raw_secret = "raw-secret-token-material";
         let record = InstanceRecord::for_current_process(
-            ControlEndpoint::localhost(4000),
+            Some(ControlEndpoint::localhost(4000)),
             "local",
             "dev.warp.WarpLocal",
             Some("test".to_owned()),
@@ -247,6 +250,20 @@ mod tests {
         assert!(!serialized.contains(raw_secret));
         assert!(!serialized.contains("auth_token"));
         assert!(!serialized.contains("bearer_token"));
+    }
+
+    #[test]
+    fn disabled_outside_warp_record_does_not_expose_actionable_authority() {
+        let record = InstanceRecord::for_current_process(
+            None,
+            "local",
+            "dev.warp.WarpLocal",
+            Some("test".to_owned()),
+            crate::protocol::ActionKind::implemented_metadata(),
+        );
+        assert!(!record.outside_warp_control_enabled);
+        assert!(record.endpoint.is_none());
+        assert!(record.credential_broker.is_none());
     }
 
     impl RegisteredInstance {

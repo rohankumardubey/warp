@@ -8,8 +8,11 @@ pub enum LocalControlInvocationContext {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalControlPermissionCategory {
-    ReadOnly,
-    ReadWrite,
+    MetadataReads,
+    UnderlyingDataReads,
+    AppStateMutations,
+    MetadataConfigurationMutations,
+    UnderlyingDataMutations,
 }
 
 define_settings_group!(LocalControlSettings, settings: [
@@ -85,19 +88,25 @@ impl LocalControlSettings {
         match (context, permission) {
             (
                 LocalControlInvocationContext::InsideWarp,
-                LocalControlPermissionCategory::ReadOnly,
+                LocalControlPermissionCategory::MetadataReads
+                | LocalControlPermissionCategory::UnderlyingDataReads,
             ) => *self.allow_inside_warp_read_only,
             (
                 LocalControlInvocationContext::OutsideWarp,
-                LocalControlPermissionCategory::ReadOnly,
+                LocalControlPermissionCategory::MetadataReads
+                | LocalControlPermissionCategory::UnderlyingDataReads,
             ) => *self.allow_outside_warp_read_only,
             (
                 LocalControlInvocationContext::InsideWarp,
-                LocalControlPermissionCategory::ReadWrite,
+                LocalControlPermissionCategory::AppStateMutations
+                | LocalControlPermissionCategory::MetadataConfigurationMutations
+                | LocalControlPermissionCategory::UnderlyingDataMutations,
             ) => *self.allow_inside_warp_read_write,
             (
                 LocalControlInvocationContext::OutsideWarp,
-                LocalControlPermissionCategory::ReadWrite,
+                LocalControlPermissionCategory::AppStateMutations
+                | LocalControlPermissionCategory::MetadataConfigurationMutations
+                | LocalControlPermissionCategory::UnderlyingDataMutations,
             ) => *self.allow_outside_warp_read_write,
         }
     }

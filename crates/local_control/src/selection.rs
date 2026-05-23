@@ -69,10 +69,11 @@ mod tests {
             app_version: None,
             started_at: Utc::now(),
             executable_path: None,
-            endpoint: ControlEndpoint::localhost(4000),
-            credential_broker: crate::discovery::CredentialBrokerReference {
+            endpoint: Some(ControlEndpoint::localhost(4000)),
+            credential_broker: Some(crate::discovery::CredentialBrokerReference {
                 endpoint: ControlEndpoint::localhost(4000),
-            },
+            }),
+            outside_warp_control_enabled: true,
             actions: vec![ActionKind::TabCreate.metadata()],
         }
     }

@@ -28,9 +28,27 @@ pub enum RiskTier {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
-pub enum LocalControlPermission {
-    ReadOnly,
-    ReadWrite,
+pub enum StateDataCategory {
+    MetadataRead,
+    UnderlyingDataRead,
+    AppStateMutation,
+    MetadataConfigurationMutation,
+    UnderlyingDataMutation,
+}
+
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PermissionCategory {
+    ReadMetadata,
+    ReadUnderlyingData,
+    MutateAppState,
+    MutateMetadataConfiguration,
+    MutateUnderlyingData,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AuthenticatedUserRequirement {
+    pub required: bool,
 }
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -59,9 +77,11 @@ pub struct ActionMetadata {
     pub name: String,
     pub implementation_status: ActionImplementationStatus,
     pub risk_tier: RiskTier,
+    pub state_data_category: StateDataCategory,
     pub requires_authenticated_user: bool,
+    pub authenticated_user: AuthenticatedUserRequirement,
     pub allowed_invocation_contexts: Vec<InvocationContext>,
-    pub permission: LocalControlPermission,
+    pub permission_category: PermissionCategory,
     pub target_scope: TargetScope,
 }
 
@@ -152,6 +172,8 @@ impl Action {
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum ActionKind {
+    #[serde(rename = "instance.list")]
+    InstanceList,
     #[serde(rename = "app.ping")]
     AppPing,
     #[serde(rename = "app.inspect")]
@@ -252,6 +274,7 @@ pub enum ActionKind {
 
 impl ActionKind {
     pub const ALL: &[Self] = &[
+        Self::InstanceList,
         Self::AppPing,
         Self::AppInspect,
         Self::AppVersion,
@@ -303,6 +326,7 @@ impl ActionKind {
     ];
     pub fn as_str(self) -> &'static str {
         match self {
+            Self::InstanceList => "instance.list",
             Self::AppPing => "app.ping",
             Self::AppInspect => "app.inspect",
             Self::AppVersion => "app.version",
@@ -355,29 +379,30 @@ impl ActionKind {
     }
 
     pub fn metadata(self) -> ActionMetadata {
-        if self == Self::TabCreate {
-            return ActionMetadata {
-                kind: self,
-                name: self.as_str().to_owned(),
-                implementation_status: ActionImplementationStatus::Implemented,
-                risk_tier: RiskTier::MutatingNonDestructive,
-                requires_authenticated_user: false,
-                allowed_invocation_contexts: vec![
-                    InvocationContext::InsideWarp,
-                    InvocationContext::OutsideWarp,
-                ],
-                permission: LocalControlPermission::ReadWrite,
-                target_scope: TargetScope::Window,
+        let (implementation_status, requires_authenticated_user, allowed_invocation_contexts) =
+            match self {
+                Self::InstanceList | Self::AppPing | Self::AppVersion | Self::TabCreate => (
+                    ActionImplementationStatus::Implemented,
+                    false,
+                    vec![
+                        InvocationContext::InsideWarp,
+                        InvocationContext::OutsideWarp,
+                    ],
+                ),
+                _ => (ActionImplementationStatus::Stub, true, Vec::new()),
             };
-        }
         ActionMetadata {
             kind: self,
             name: self.as_str().to_owned(),
-            implementation_status: ActionImplementationStatus::Stub,
+            implementation_status,
             risk_tier: self.default_risk_tier(),
-            requires_authenticated_user: true,
-            allowed_invocation_contexts: Vec::new(),
-            permission: self.default_permission(),
+            state_data_category: self.default_state_data_category(),
+            requires_authenticated_user,
+            authenticated_user: AuthenticatedUserRequirement {
+                required: requires_authenticated_user,
+            },
+            allowed_invocation_contexts,
+            permission_category: self.default_permission_category(),
             target_scope: self.default_target_scope(),
         }
     }
@@ -399,7 +424,8 @@ impl ActionKind {
 
     fn default_risk_tier(self) -> RiskTier {
         match self {
-            Self::AppPing
+            Self::InstanceList
+            | Self::AppPing
             | Self::AppInspect
             | Self::AppVersion
             | Self::AppActive
@@ -450,17 +476,70 @@ impl ActionKind {
         }
     }
 
-    fn default_permission(self) -> LocalControlPermission {
-        match self.default_risk_tier() {
-            RiskTier::ReadOnlyMetadata | RiskTier::ReadOnlyTerminalData => {
-                LocalControlPermission::ReadOnly
+    fn default_state_data_category(self) -> StateDataCategory {
+        match self {
+            Self::InstanceList
+            | Self::AppPing
+            | Self::AppInspect
+            | Self::AppVersion
+            | Self::AppActive
+            | Self::WindowList
+            | Self::TabList
+            | Self::PaneList
+            | Self::SessionList
+            | Self::ThemeList
+            | Self::AppearanceGet
+            | Self::SettingGet
+            | Self::SettingList => StateDataCategory::MetadataRead,
+            Self::SettingSet
+            | Self::SettingToggle
+            | Self::ThemeSet
+            | Self::AppearanceSet
+            | Self::AppearanceFontSize
+            | Self::AppearanceZoom => StateDataCategory::MetadataConfigurationMutation,
+            Self::InputInsert | Self::InputReplace | Self::InputClear | Self::InputModeSet => {
+                StateDataCategory::UnderlyingDataMutation
             }
-            RiskTier::MutatingNonDestructive | RiskTier::MutatingDestructiveOrExecution => {
-                LocalControlPermission::ReadWrite
-            }
+            Self::AppFocus
+            | Self::AppSettingsOpen
+            | Self::AppCommandPaletteOpen
+            | Self::AppCommandSearchOpen
+            | Self::AppWarpDriveOpen
+            | Self::AppWarpDriveToggle
+            | Self::AppResourceCenterToggle
+            | Self::AppAiAssistantToggle
+            | Self::AppCodeReviewToggle
+            | Self::AppVerticalTabsToggle
+            | Self::WindowCreate
+            | Self::WindowFocus
+            | Self::WindowClose
+            | Self::TabCreate
+            | Self::TabActivate
+            | Self::TabMove
+            | Self::TabRename
+            | Self::TabClose
+            | Self::PaneSplit
+            | Self::PaneFocus
+            | Self::PaneNavigate
+            | Self::PaneClose
+            | Self::PaneMaximize
+            | Self::PaneResize
+            | Self::PaneSessionPrevious
+            | Self::PaneSessionNext => StateDataCategory::AppStateMutation,
         }
     }
 
+    fn default_permission_category(self) -> PermissionCategory {
+        match self.default_state_data_category() {
+            StateDataCategory::MetadataRead => PermissionCategory::ReadMetadata,
+            StateDataCategory::UnderlyingDataRead => PermissionCategory::ReadUnderlyingData,
+            StateDataCategory::AppStateMutation => PermissionCategory::MutateAppState,
+            StateDataCategory::MetadataConfigurationMutation => {
+                PermissionCategory::MutateMetadataConfiguration
+            }
+            StateDataCategory::UnderlyingDataMutation => PermissionCategory::MutateUnderlyingData,
+        }
+    }
     fn default_target_scope(self) -> TargetScope {
         match self {
             Self::WindowList | Self::WindowCreate | Self::WindowFocus | Self::WindowClose => {
@@ -504,7 +583,8 @@ impl ActionKind {
             | Self::AppAiAssistantToggle
             | Self::AppCodeReviewToggle
             | Self::AppVerticalTabsToggle => TargetScope::Surface,
-            Self::AppPing
+            Self::InstanceList
+            | Self::AppPing
             | Self::AppInspect
             | Self::AppVersion
             | Self::AppActive
@@ -627,67 +707,5 @@ impl std::fmt::Display for ErrorCode {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn request_envelope_serializes_stable_action_names() {
-        let request = RequestEnvelope::new(Action::new(ActionKind::WindowFocus));
-        let value = serde_json::to_value(&request).expect("request serializes");
-        assert_eq!(value["protocol_version"], PROTOCOL_VERSION);
-        assert_eq!(value["action"]["kind"], "window.focus");
-    }
-
-    #[test]
-    fn response_error_serializes_machine_code() {
-        let response = ResponseEnvelope::error(
-            Uuid::nil(),
-            ControlError::new(ErrorCode::UnauthorizedLocalClient, "bad token"),
-        );
-        let value = serde_json::to_value(&response).expect("response serializes");
-        assert_eq!(value["response"]["status"], "error");
-        assert_eq!(
-            value["response"]["error"]["code"],
-            "unauthorized_local_client"
-        );
-    }
-
-    #[test]
-    fn input_run_is_not_in_the_allowlisted_catalog() {
-        let action = serde_json::from_value::<ActionKind>(serde_json::json!("input.run"));
-        assert!(action.is_err());
-    }
-
-    #[test]
-    fn tab_create_metadata_is_first_slice_logged_out_safe_mutation() {
-        let metadata = ActionKind::TabCreate.metadata();
-        assert_eq!(
-            metadata.implementation_status,
-            ActionImplementationStatus::Implemented
-        );
-        assert_eq!(metadata.risk_tier, RiskTier::MutatingNonDestructive);
-        assert!(!metadata.requires_authenticated_user);
-        assert_eq!(metadata.permission, LocalControlPermission::ReadWrite);
-        assert_eq!(
-            metadata.allowed_invocation_contexts,
-            vec![
-                InvocationContext::InsideWarp,
-                InvocationContext::OutsideWarp
-            ]
-        );
-    }
-
-    #[test]
-    fn non_first_slice_actions_are_catalog_stubs() {
-        let metadata = ActionKind::WindowCreate.metadata();
-        assert_eq!(
-            metadata.implementation_status,
-            ActionImplementationStatus::Stub
-        );
-        assert!(
-            !metadata
-                .allowed_invocation_contexts
-                .contains(&InvocationContext::OutsideWarp)
-        );
-    }
-}
+#[path = "protocol_tests.rs"]
+mod tests;

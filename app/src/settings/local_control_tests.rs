@@ -30,19 +30,31 @@ fn defaults_allow_inside_warp_permissions_only() {
 
     assert!(settings.allows(
         LocalControlInvocationContext::InsideWarp,
-        LocalControlPermissionCategory::ReadOnly
+        LocalControlPermissionCategory::MetadataReads
     ));
     assert!(settings.allows(
         LocalControlInvocationContext::InsideWarp,
-        LocalControlPermissionCategory::ReadWrite
+        LocalControlPermissionCategory::UnderlyingDataReads
+    ));
+    assert!(settings.allows(
+        LocalControlInvocationContext::InsideWarp,
+        LocalControlPermissionCategory::AppStateMutations
+    ));
+    assert!(settings.allows(
+        LocalControlInvocationContext::InsideWarp,
+        LocalControlPermissionCategory::MetadataConfigurationMutations
+    ));
+    assert!(settings.allows(
+        LocalControlInvocationContext::InsideWarp,
+        LocalControlPermissionCategory::UnderlyingDataMutations
     ));
     assert!(!settings.allows(
         LocalControlInvocationContext::OutsideWarp,
-        LocalControlPermissionCategory::ReadOnly
+        LocalControlPermissionCategory::MetadataReads
     ));
     assert!(!settings.allows(
         LocalControlInvocationContext::OutsideWarp,
-        LocalControlPermissionCategory::ReadWrite
+        LocalControlPermissionCategory::AppStateMutations
     ));
 }
 
@@ -73,10 +85,10 @@ fn disabled_context_blocks_enabled_granular_permissions() {
 
     assert!(!settings.allows(
         LocalControlInvocationContext::InsideWarp,
-        LocalControlPermissionCategory::ReadWrite
+        LocalControlPermissionCategory::AppStateMutations
     ));
     assert!(!settings.allows(
         LocalControlInvocationContext::OutsideWarp,
-        LocalControlPermissionCategory::ReadOnly
+        LocalControlPermissionCategory::MetadataReads
     ));
 }
