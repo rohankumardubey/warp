@@ -4,8 +4,9 @@ The first implementation slice is intentionally narrow:
 - discover compatible running Warp instances;
 - select one instance implicitly when unambiguous or explicitly with `--instance`;
 - send authenticated local-control requests through the per-instance discovery record;
+- return implemented app metadata for `warpctrl instance list`, `warpctrl app ping`, and `warpctrl app version`;
 - create a new terminal tab with `warpctrl tab create`.
-The local-control protocol and catalog are broader than this slice, but commands outside the implemented capability set should fail with structured unsupported-action errors until their handlers land.
+The integrated read-only CLI/protocol contract is broader than the currently implemented app bridge. Parser and protocol entries exist for the read-only families below, but commands whose action metadata is still `stub` should fail with structured `unsupported_action` errors until their handlers land. Operator docs and Agent skills must not present stubbed commands as guaranteed live app handlers.
 ## Packaging model
 `warpctrl` should be packaged as a separate CLI artifact from the Warp GUI app while reusing shared repository code:
 - `crates/local_control` owns discovery records, local authentication material, client transport, protocol envelopes, action names, and error types.
@@ -29,25 +30,67 @@ Run `warpctrl --version` after installation to confirm the shell is resolving th
 ### Windows
 Build locally with `cargo build -p warp --bin warpctrl`, then run `target\debug\warpctrl.exe` or copy that binary onto `PATH`.
 The Windows-native binary target exists in this slice. Installer helper creation and release-artifact wiring still need a later packaging change before docs can promise an installer-provided `warpctrl` command.
+## Read-only command contract
+The read-only contract separates low-sensitivity metadata reads from underlying-data reads. This distinction matters for Settings > Scripting grants and for Agent behavior. Metadata read permission must not be treated as permission to read terminal contents, command history, input buffers, or object contents.
+### Metadata reads
+Metadata reads inspect local app structure or configuration without exposing terminal contents. Contracted command forms are:
+- `warpctrl instance list`
+- `warpctrl app ping`
+- `warpctrl app version`
+- `warpctrl app active`
+- `warpctrl app inspect`
+- `warpctrl action list`
+- `warpctrl action get <action>`
+- `warpctrl window list`
+- `warpctrl tab list`
+- `warpctrl pane list`
+- `warpctrl session list`
+- `warpctrl theme list`
+- `warpctrl appearance get`
+- `warpctrl setting list`
+- `warpctrl setting get <key>`
+- `warpctrl file list`
+- `warpctrl drive list [--type workflow|notebook|environment|prompt]`
+`drive list` is still a metadata read, but it is authenticated-user data and should only succeed when the selected app has a logged-in Warp user and the credential grants authenticated-user access.
+### Underlying-data reads
+Underlying-data reads can expose terminal-derived or user-authored content. They require the underlying-data read category, not just metadata read permission. Contracted command forms are:
+- `warpctrl block list [--limit <n>]`
+- `warpctrl block get <block_id>`
+- `warpctrl input get`
+- `warpctrl history list [--limit <n>]`
+- `warpctrl drive get --type workflow|notebook|environment|prompt <id>`
+Use the narrowest command and limit available. Treat returned block output, input text, history commands, and Drive object content as sensitive task context.
+### Mutations outside this read-only contract
+Do not document read-write commands as implemented from this read-only docs shard. `warpctrl tab create` is implemented as the first app-state mutation smoke test, but it is not a read-only command and requires app-state mutation permission. Other catalog mutations, including window creation/focus/close, pane split/focus/navigation/close/resize, theme or appearance writes, setting writes/toggles, app surface toggles, input insertion/replacement/clear, mode switching, and command execution, must remain out of read-only recipes until their owned handlers and reviews land.
+## Safe targeting guidance
+For repeatable scripts and Agent workflows:
+- Start with `warpctrl --output-format json instance list` and record the target `instance_id`.
+- If exactly one compatible instance is listed, implicit targeting may be acceptable for interactive use. In scripts, pass `--instance <instance_id>` once discovered.
+- If multiple instances are listed, always pass `--instance`; do not rely on active/frontmost selection unless the task is explicitly interactive and ambiguity is acceptable.
+- Prefer opaque `instance_id` selectors over PID selectors for durable automation. `--pid` is a convenience filter for short-lived local debugging.
+- Handle structured failures explicitly: `no_instance`, `ambiguous_instance`, `local_control_disabled`, `unauthorized_local_client`, `insufficient_permissions`, `authenticated_user_required`, `authenticated_user_unavailable`, `execution_context_not_allowed`, `unsupported_action`, and `stale_target`.
+- Treat `unsupported_action` as a version or implementation mismatch, not as permission to fall back to mutating UI automation or internal dispatch.
+- Do not reuse target IDs returned by read commands after the user changes layout without re-reading state; stale explicit selectors must fail rather than silently retargeting.
+
 ## End-to-end local test flow
 Use matching app and CLI bits from the same branch or release artifact so the protocol version and action catalog agree.
 1. Start Warp and leave at least one window open.
 2. Confirm that the local-control server registered the running process:
    ```bash
-   warpctrl instance list
+   warpctrl --output-format json instance list
    ```
-3. If exactly one compatible instance is listed, create a new terminal tab:
+3. Copy the desired `instance_id`, then check the selected app's protocol version:
    ```bash
-   warpctrl tab create
+   warpctrl --output-format json app version --instance <instance_id>
    ```
-4. If multiple compatible instances are listed, copy the desired `instance_id` and target it explicitly:
+4. If you are smoke-testing the first implemented mutation, create a new terminal tab explicitly in that instance:
    ```bash
    warpctrl tab create --instance <instance_id>
    ```
 5. Verify the running app receives focus for the selected instance and a new terminal tab appears according to Warp's normal new-tab placement behavior.
-6. In a future slice that implements `tab list`, inspect state before and after the mutation:
+6. Once read-only handlers beyond first-slice metadata are implemented, inspect state with explicit targeting before using returned IDs in later commands:
    ```bash
-   warpctrl tab list --instance <instance_id>
+   warpctrl --output-format json tab list --instance <instance_id>
    ```
 Expected failures:
 - no running compatible app: exits non-zero with a no-instance error;
