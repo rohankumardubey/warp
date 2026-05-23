@@ -1,12 +1,12 @@
 # warpctrl operator README
-`warpctrl` is the provisional standalone CLI for controlling an already-running local Warp app instance. It is intended for scripts, demos, agent workflows, and developer automation that need to perform allowlisted Warp UI actions without launching the GUI executable in CLI mode.
-The first implementation slice is intentionally narrow:
+`warpctrl` is the provisional standalone CLI for controlling an already-running local Warp app instance. It is intended for scripts, demos, Agent workflows, and developer automation that need to perform allowlisted Warp UI actions without launching the GUI executable in CLI mode.
+The initial live implementation slice is intentionally narrow:
 - discover compatible running Warp instances;
 - select one instance implicitly when unambiguous or explicitly with `--instance`;
 - send authenticated local-control requests through the per-instance discovery record;
 - return implemented app metadata for `warpctrl instance list`, `warpctrl app ping`, and `warpctrl app version`;
 - create a new terminal tab with `warpctrl tab create`.
-The integrated read-only CLI/protocol contract is broader than the currently implemented app bridge. Parser and protocol entries exist for the read-only families below, but commands whose action metadata is still `stub` should fail with structured `unsupported_action` errors until their handlers land. Operator docs and Agent skills must not present stubbed commands as guaranteed live app handlers.
+The integrated CLI/protocol contract is broader than the currently implemented app bridge. Parser and protocol entries exist for read-only and mutating families below, but commands whose action metadata is still `stub` should fail with structured `unsupported_action` errors until their handlers land. Operator docs and Agent skills must not present stubbed commands as guaranteed live app handlers.
 ## Packaging model
 `warpctrl` should be packaged as a separate CLI artifact from the Warp GUI app while reusing shared repository code:
 - `crates/local_control` owns discovery records, local authentication material, client transport, protocol envelopes, action names, and error types.
@@ -61,7 +61,93 @@ Underlying-data reads can expose terminal-derived or user-authored content. They
 - `warpctrl drive get --type workflow|notebook|environment|prompt <id>`
 Use the narrowest command and limit available. Treat returned block output, input text, history commands, and Drive object content as sensitive task context.
 ### Mutations outside this read-only contract
-Do not document read-write commands as implemented from this read-only docs shard. `warpctrl tab create` is implemented as the first app-state mutation smoke test, but it is not a read-only command and requires app-state mutation permission. Other catalog mutations, including window creation/focus/close, pane split/focus/navigation/close/resize, theme or appearance writes, setting writes/toggles, app surface toggles, input insertion/replacement/clear, mode switching, and command execution, must remain out of read-only recipes until their owned handlers and reviews land.
+Do not document read-write commands as read-only recipes. `warpctrl tab create` is implemented as the first app-state mutation smoke test on integrated builds, but it is not a read-only command and requires app-state mutation permission. Other catalog mutations must remain out of read-only recipes until their owned handlers and reviews land.
+## Permission categories
+The protocol metadata preserves five local-control permission categories. These names are the source of truth for Agent/operator behavior:
+- `read_metadata` — app structure and non-sensitive configuration reads.
+- `read_underlying_data` — terminal content, command history, input buffers, Drive object content, and other user data reads.
+- `mutate_app_state` — visible Warp app state changes such as focusing windows, creating or activating tabs, moving panes, opening surfaces, closing UI targets, and file open intents.
+- `mutate_metadata_configuration` — allowlisted settings, theme, font, zoom, and appearance writes.
+- `mutate_underlying_data` — terminal input injection, command execution, file writes/deletes, Drive CRUD, Drive insertion, and workflow execution.
+App-state mutation permission must never imply underlying-data mutation permission. In particular, `input.run`, input insertion/replacement/clearing, file writes/deletes, Drive create/update/delete/run/insert, and workflow execution require `mutate_underlying_data` plus any authenticated-user and policy checks declared in action metadata.
+Before relying on any command, inspect action metadata on the selected running app:
+```bash
+warpctrl --output-format json action get --instance <instance_id> <action.name>
+```
+Confirm `implementation_status`, `permission_category`, `risk_tier`, `requires_authenticated_user`, `allowed_invocation_contexts`, and target scope before executing the command.
+## Mutating command contract
+The read-write CLI/protocol contract includes app-state mutations, metadata/configuration mutations, and underlying-data mutations. Except for `tab.create` on integrated first-slice builds, these command forms are contract entries and must be treated as unavailable until action metadata reports `implementation_status: implemented` for the selected app.
+### App-state mutations
+App-state mutations require `mutate_app_state`. They change visible app/UI state and must not be used as a proxy for terminal input, file writes, Drive object mutation, or command execution.
+Contracted command forms include:
+- `warpctrl app focus`
+- `warpctrl app settings-open [--page <page>]`
+- `warpctrl app command-palette-open [--query <query>]`
+- `warpctrl app command-search-open [--query <query>]`
+- `warpctrl app warp-drive-open`
+- `warpctrl app warp-drive-toggle`
+- `warpctrl app resource-center-toggle`
+- `warpctrl app ai-assistant-toggle`
+- `warpctrl app code-review-toggle`
+- `warpctrl app vertical-tabs-toggle`
+- `warpctrl window create [--profile <profile>]`
+- `warpctrl window focus`
+- `warpctrl window close [--force]`
+- `warpctrl tab create`
+- `warpctrl tab activate`
+- `warpctrl tab previous`
+- `warpctrl tab next`
+- `warpctrl tab last`
+- `warpctrl tab move --direction left|right`
+- `warpctrl tab rename <title>` or `warpctrl tab rename --reset`
+- `warpctrl tab close [--scope target|others|right] [--force]`
+- `warpctrl pane split --direction left|right|up|down [--profile <profile>]`
+- `warpctrl pane focus`
+- `warpctrl pane navigate --direction left|right|up|down`
+- `warpctrl pane close [--force]`
+- `warpctrl pane maximize [--enabled true|false]`
+- `warpctrl pane resize --direction left|right|up|down [--amount <n>]`
+- `warpctrl pane previous-session`
+- `warpctrl pane next-session`
+- `warpctrl file open <path> [--line <n>] [--new-window]`
+Closing windows, tabs, or panes is destructive/high-risk even though it uses the app-state mutation category. Require explicit task authorization before running close commands.
+### Metadata/configuration mutations
+Metadata/configuration mutations require `mutate_metadata_configuration`. They write only allowlisted settings and appearance state through the app bridge.
+Contracted command forms include:
+- `warpctrl theme set <name>`
+- `warpctrl appearance set [--theme <name>] [--follow-system-theme true|false] [--light-theme <name>] [--dark-theme <name>]`
+- `warpctrl appearance font-size increase|decrease|reset|set [--value <n>]`
+- `warpctrl appearance zoom increase|decrease|reset|set [--value <n>]`
+- `warpctrl setting set <key> <value>`
+- `warpctrl setting toggle <key>`
+Settings writes must be allowlisted and value-validated by the selected app. Reject private, debug-only, unsafe, derived, or unsupported settings rather than editing settings files directly.
+### Underlying-data mutations
+Underlying-data mutations require `mutate_underlying_data`. They can alter terminal input, execute code, write/delete files, or mutate authenticated Warp Drive objects. They are separate from app-state mutations and require explicit approval before use in Agent workflows.
+Contracted command forms include:
+- `warpctrl input insert <text> [--replace]`
+- `warpctrl input replace <text>`
+- `warpctrl input clear`
+- `warpctrl input mode terminal|agent`
+- `warpctrl input run <command>`
+- `warpctrl file write <path> <contents> [--create]`
+- `warpctrl file delete <path> [--recursive]`
+- `warpctrl drive create --type workflow|notebook|environment|prompt <name> <content>`
+- `warpctrl drive update --type workflow|notebook|environment|prompt <id> <content>`
+- `warpctrl drive delete --type workflow|notebook|environment|prompt <id>`
+- `warpctrl drive run --type workflow|notebook|environment|prompt <id>`
+- `warpctrl drive insert --type workflow|notebook|environment|prompt <id>`
+`input.run`, Drive workflow execution, and any command that inserts or writes user-provided content can execute or stage commands in a terminal session. Treat command text, terminal input, file contents, and Drive object content as sensitive.
+## Agent approval guidance for mutations
+Agent workflows should start from read-only discovery, then request the narrowest mutation needed. The user's task may authorize low-risk app-state changes when it names the intended visible change, such as creating a tab or focusing a pane.
+Require explicit user authorization in the task before running:
+- destructive app-state mutations such as window/tab/pane close;
+- all `mutate_underlying_data` commands;
+- command execution, input insertion/replacement/clearing, or input mode switching;
+- file writes/deletes;
+- Drive create/update/delete/run/insert actions;
+- any mutation where the target or effect is ambiguous.
+Approval for an underlying-data mutation must identify the operation, selected instance or target object, and exact command/content when applicable. Do not infer approval for command execution, file mutation, or Drive mutation from a general instruction to use `warpctrl`, from a read-only grant, or from `mutate_app_state` permission.
+If approval is missing, target selection is ambiguous, metadata reports `stub`, or the app returns `unsupported_action`, stop and report the blocker. Do not retry with broader authority, a different active target, GUI automation, direct file writes, or internal dispatch.
 ## Safe targeting guidance
 For repeatable scripts and Agent workflows:
 - Start with `warpctrl --output-format json instance list` and record the target `instance_id`.

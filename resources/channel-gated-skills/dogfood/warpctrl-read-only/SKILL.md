@@ -90,3 +90,4 @@ Do not use or document these as implemented read-only recipes:
 - terminal input mutations such as insert, replace, clear, mode switching, or command execution.
 
 If the user explicitly asks for a mutation, leave this skill and verify the command's implemented action metadata and permission category before proceeding.
+Use the `warpctrl-mutating-commands` skill for mutation-specific permission and approval guidance.
