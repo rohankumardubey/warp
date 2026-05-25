@@ -10,10 +10,10 @@ use crate::appearance::Appearance;
 use crate::features::FeatureFlag;
 use crate::report_if_error;
 use crate::settings::{
-    AllowOutsideWarpAppStateMutations, AllowOutsideWarpControl,
-    AllowOutsideWarpMetadataConfigurationMutations, AllowOutsideWarpMetadataReads,
-    AllowOutsideWarpUnderlyingDataMutations, AllowOutsideWarpUnderlyingDataReads,
-    LocalControlSettings,
+    AllowOutsideWarpAppStateMutations, AllowOutsideWarpAuthenticatedUserActions,
+    AllowOutsideWarpControl, AllowOutsideWarpMetadataConfigurationMutations,
+    AllowOutsideWarpMetadataReads, AllowOutsideWarpUnderlyingDataMutations,
+    AllowOutsideWarpUnderlyingDataReads, LocalControlSettings,
 };
 use settings::{Setting as _, ToggleableSetting as _};
 use std::cell::RefCell;
@@ -33,6 +33,7 @@ pub enum ScriptingToggle {
     OutsideWarpAppStateMutations,
     OutsideWarpMetadataConfigurationMutations,
     OutsideWarpUnderlyingDataMutations,
+    OutsideWarpAuthenticatedUserActions,
 }
 
 impl ScriptingToggle {
@@ -46,6 +47,7 @@ impl ScriptingToggle {
                 "Allow metadata/configuration mutations"
             }
             Self::OutsideWarpUnderlyingDataMutations => "Allow underlying data mutations",
+            Self::OutsideWarpAuthenticatedUserActions => "Allow authenticated user actions",
         }
     }
 
@@ -68,6 +70,9 @@ impl ScriptingToggle {
             }
             Self::OutsideWarpUnderlyingDataMutations => {
                 "Allows external local clients to mutate underlying user data when those commands are implemented."
+            }
+            Self::OutsideWarpAuthenticatedUserActions => {
+                "Requires a valid authenticated scripting grant for actions that access user data. External API keys and verified terminal sessions must present a scripting grant with sufficient scopes."
             }
         }
     }
@@ -92,6 +97,9 @@ impl ScriptingToggle {
             Self::OutsideWarpUnderlyingDataMutations => {
                 "outside warp underlying data mutate input files drive"
             }
+            Self::OutsideWarpAuthenticatedUserActions => {
+                "outside warp authenticated user actions api key scripting grant identity"
+            }
         }
     }
 
@@ -109,6 +117,9 @@ impl ScriptingToggle {
             Self::OutsideWarpUnderlyingDataMutations => {
                 *settings.allow_outside_warp_underlying_data_mutations
             }
+            Self::OutsideWarpAuthenticatedUserActions => {
+                *settings.allow_outside_warp_authenticated_user_actions
+            }
         }
     }
 
@@ -125,6 +136,9 @@ impl ScriptingToggle {
             }
             Self::OutsideWarpUnderlyingDataMutations => {
                 AllowOutsideWarpUnderlyingDataMutations::storage_key()
+            }
+            Self::OutsideWarpAuthenticatedUserActions => {
+                AllowOutsideWarpAuthenticatedUserActions::storage_key()
             }
         }
     }
@@ -145,6 +159,9 @@ impl ScriptingToggle {
             Self::OutsideWarpUnderlyingDataMutations => {
                 AllowOutsideWarpUnderlyingDataMutations::sync_to_cloud()
             }
+            Self::OutsideWarpAuthenticatedUserActions => {
+                AllowOutsideWarpAuthenticatedUserActions::sync_to_cloud()
+            }
         }
     }
 
@@ -155,7 +172,8 @@ impl ScriptingToggle {
             | Self::OutsideWarpUnderlyingDataReads
             | Self::OutsideWarpAppStateMutations
             | Self::OutsideWarpMetadataConfigurationMutations
-            | Self::OutsideWarpUnderlyingDataMutations => true,
+            | Self::OutsideWarpUnderlyingDataMutations
+            | Self::OutsideWarpAuthenticatedUserActions => true,
         }
     }
 }
@@ -199,6 +217,9 @@ impl ScriptingSettingsPageView {
                     )),
                     Box::new(ScriptingToggleWidget::new(
                         ScriptingToggle::OutsideWarpUnderlyingDataMutations,
+                    )),
+                    Box::new(ScriptingToggleWidget::new(
+                        ScriptingToggle::OutsideWarpAuthenticatedUserActions,
                     )),
                 ],
                 Some("Scripting"),
@@ -247,6 +268,11 @@ impl TypedActionView for ScriptingSettingsPageView {
                     ScriptingToggle::OutsideWarpUnderlyingDataMutations => {
                         report_if_error!(settings
                             .allow_outside_warp_underlying_data_mutations
+                            .toggle_and_save_value(ctx));
+                    }
+                    ScriptingToggle::OutsideWarpAuthenticatedUserActions => {
+                        report_if_error!(settings
+                            .allow_outside_warp_authenticated_user_actions
                             .toggle_and_save_value(ctx));
                     }
                 });
