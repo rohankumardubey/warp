@@ -571,7 +571,12 @@ impl ActionKind {
             | Self::ThemeList
             | Self::AppearanceGet
             | Self::SettingList
-            | Self::SettingGet => ActionImplementationStatus::Implemented,
+            | Self::SettingGet
+            | Self::FileList
+            | Self::ProjectActive
+            | Self::ProjectList
+            | Self::DriveList
+            | Self::DriveInspect => ActionImplementationStatus::Implemented,
             Self::AppFocus
             | Self::AuthStatus
             | Self::AuthLogin
@@ -632,13 +637,8 @@ impl ActionKind {
             | Self::SurfaceLeftPanelToggle
             | Self::SurfaceRightPanelToggle
             | Self::SurfaceVerticalTabsToggle
-            | Self::FileList
             | Self::FileOpen
-            | Self::ProjectActive
-            | Self::ProjectList
             | Self::ProjectOpen
-            | Self::DriveList
-            | Self::DriveInspect
             | Self::DriveOpen
             | Self::DriveNotebookOpen
             | Self::DriveEnvVarCollectionOpen

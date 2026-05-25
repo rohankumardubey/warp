@@ -24,10 +24,15 @@ pub use discovery::{
     discovery_dir,
 };
 pub use protocol::{
-    Action, ActionParams, ApiKeySource, BlockOutputFormat, ControlError, ControlResponse,
-    ControlResult, Direction, ErrorCode, ErrorResponseEnvelope, ExecutionContextProof,
-    FileOpenParams, InputMode, PROTOCOL_VERSION, RequestEnvelope, ResponseEnvelope,
-    TabActivationMode, TabCloseMode, TabCreateParams, TabType,
+    Action, ActionParams, ApiKeySource, AppearanceStateResult, BlockListParams,
+    BlockListResult, BlockOutputFormat, BlockOutputParams, BlockOutputResult, BlockSummary,
+    ControlError, ControlResponse, ControlResult, Direction, DriveInspectParams,
+    DriveInspectResult, DriveListParams, DriveListResult, DriveObjectSummary, ErrorCode,
+    ErrorResponseEnvelope, ExecutionContextProof, FileListResult, FileOpenParams, FileSummary,
+    HistoryEntrySummary, HistoryListParams, HistoryListResult, InputMode, InputStateResult,
+    PROTOCOL_VERSION, ProjectActiveResult, ProjectListResult, ProjectSummary, RequestEnvelope,
+    ResponseEnvelope, SettingGetParams, SettingGetResult, SettingListResult, SettingSummary,
+    TabActivationMode, TabCloseMode, TabCreateParams, TabType, ThemeListResult, ThemeSummary,
 };
 pub use selectors::{
     BlockSelector, BlockTarget, DriveObjectId, DriveObjectTarget, DriveObjectType, FileTarget,

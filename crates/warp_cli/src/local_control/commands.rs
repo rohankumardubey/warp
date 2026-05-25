@@ -296,25 +296,34 @@ pub(super) fn run_action_command(
     }
 }
 
-pub(super) fn run_file_command(command: FileCommand) -> Result<(), ControlError> {
+pub(super) fn run_file_command(
+    command: FileCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
     match command {
-        FileCommand::List(_) => unsupported_action("file.list"),
+        FileCommand::List(args) => run_action(args, ActionKind::FileList, json!({}), output_format),
         FileCommand::Open(_) => unsupported_action("file.open"),
     }
 }
 
-pub(super) fn run_project_command(command: ProjectCommand) -> Result<(), ControlError> {
+pub(super) fn run_project_command(
+    command: ProjectCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
     match command {
-        ProjectCommand::Active(_) => unsupported_action("project.active"),
-        ProjectCommand::List(_) => unsupported_action("project.list"),
+        ProjectCommand::Active(args) => run_action(args, ActionKind::ProjectActive, json!({}), output_format),
+        ProjectCommand::List(args) => run_action(args, ActionKind::ProjectList, json!({}), output_format),
         ProjectCommand::Open(_) => unsupported_action("project.open"),
     }
 }
 
-pub(super) fn run_drive_command(command: DriveCommand) -> Result<(), ControlError> {
+pub(super) fn run_drive_command(
+    command: DriveCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
     match command {
-        DriveCommand::List(_) => unsupported_action("drive.list"),
-        DriveCommand::Inspect(_) => unsupported_action("drive.inspect"),
+        DriveCommand::List(args) => run_action(args.target, ActionKind::DriveList, json!({ "object_type": drive_object_type_name(args.object_type) }), output_format),
+        DriveCommand::Inspect(args) => run_action(args.target, ActionKind::DriveInspect, json!({ "id": args.id }), output_format),
         DriveCommand::Open(_) => unsupported_action("drive.open"),
         DriveCommand::Notebook(_) => unsupported_action("drive.notebook.open"),
         DriveCommand::EnvVarCollection(_) => unsupported_action("drive.env-var-collection.open"),
@@ -346,6 +355,21 @@ pub(super) fn run_auth_command(command: AuthCommand) -> Result<(), ControlError>
     }
 }
 
+
+
+fn drive_object_type_name(object_type: crate::local_control::DriveObjectType) -> &'static str {
+    match object_type {
+        crate::local_control::DriveObjectType::Workflow => "workflow",
+        crate::local_control::DriveObjectType::Notebook => "notebook",
+        crate::local_control::DriveObjectType::EnvVarCollection => "env_var_collection",
+        crate::local_control::DriveObjectType::Prompt => "prompt",
+        crate::local_control::DriveObjectType::Folder => "folder",
+        crate::local_control::DriveObjectType::AiFact => "ai_fact",
+        crate::local_control::DriveObjectType::McpServer => "mcp_server",
+        crate::local_control::DriveObjectType::Space => "space",
+        crate::local_control::DriveObjectType::Trash => "trash",
+    }
+}
 
 fn block_output_format(plain: bool, ansi: bool, json: bool) -> &'static str {
     if ansi {
