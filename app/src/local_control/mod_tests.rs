@@ -148,6 +148,7 @@ fn tab_create_accepts_default_and_active_targets() {
         tab: Some(TabTarget::Active),
         pane: Some(PaneTarget::Active),
         session: Some(SessionTarget::Active),
+        ..TargetSelector::default()
     })
     .expect("active target is accepted");
 }
@@ -532,7 +533,7 @@ fn data_actions_require_underlying_data_permission_not_metadata_permission() {
 fn action_get_rejects_unallowlisted_action_names() {
     let err = validate_action_params(&Action {
         kind: ActionKind::ActionGet,
-        params: serde_json::json!({ "action": "input.run" }),
+        params: serde_json::json!({ "action": "input.execute" }),
     })
     .expect_err("unallowlisted action is rejected");
     assert_eq!(err.code, ErrorCode::NotAllowlisted);
