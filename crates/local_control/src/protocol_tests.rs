@@ -9,6 +9,39 @@ fn request_envelope_serializes_stable_action_names() {
 }
 
 #[test]
+fn drive_object_mutation_metadata_requires_authenticated_user() {
+    for action in [
+        ActionKind::DriveObjectCreate,
+        ActionKind::DriveObjectUpdate,
+        ActionKind::DriveObjectDelete,
+        ActionKind::DriveObjectInsert,
+        ActionKind::DriveObjectShareToTeam,
+    ] {
+        let metadata = action.metadata();
+        assert_eq!(
+            metadata.implementation_status,
+            ActionImplementationStatus::Implemented
+        );
+        assert_eq!(metadata.risk_tier, RiskTier::MutatingDestructiveOrExecution);
+        assert_eq!(
+            metadata.state_data_category,
+            StateDataCategory::UnderlyingDataMutation
+        );
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::MutateUnderlyingData
+        );
+        assert!(metadata.requires_authenticated_user);
+        assert!(metadata.authenticated_user.required);
+        assert_eq!(metadata.target_scope, TargetScope::Drive);
+        assert_eq!(
+            metadata.allowed_invocation_contexts,
+            vec![InvocationContext::OutsideWarp]
+        );
+    }
+}
+
+#[test]
 fn response_error_serializes_machine_code() {
     let response = ResponseEnvelope::error(
         Uuid::nil(),
@@ -110,6 +143,10 @@ fn default_permissions_preserve_security_categories() {
     );
     assert_eq!(
         ActionKind::InputInsert.metadata().permission_category,
+        PermissionCategory::MutateUnderlyingData
+    );
+    assert_eq!(
+        ActionKind::DriveObjectCreate.metadata().permission_category,
         PermissionCategory::MutateUnderlyingData
     );
     assert_eq!(

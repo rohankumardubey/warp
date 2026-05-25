@@ -73,6 +73,7 @@ pub enum TargetScope {
     Settings,
     Appearance,
     Surface,
+    Drive,
 }
 
 /// Whether an action has an app-side implementation in this stack layer.
@@ -199,6 +200,16 @@ pub enum ActionKind {
     SettingSet,
     #[serde(rename = "setting.toggle")]
     SettingToggle,
+    #[serde(rename = "drive.object.create")]
+    DriveObjectCreate,
+    #[serde(rename = "drive.object.update")]
+    DriveObjectUpdate,
+    #[serde(rename = "drive.object.delete")]
+    DriveObjectDelete,
+    #[serde(rename = "drive.object.insert")]
+    DriveObjectInsert,
+    #[serde(rename = "drive.object.share_to_team")]
+    DriveObjectShareToTeam,
 }
 
 impl ActionKind {
@@ -252,6 +263,11 @@ impl ActionKind {
         Self::SettingList,
         Self::SettingSet,
         Self::SettingToggle,
+        Self::DriveObjectCreate,
+        Self::DriveObjectUpdate,
+        Self::DriveObjectDelete,
+        Self::DriveObjectInsert,
+        Self::DriveObjectShareToTeam,
     ];
     pub fn as_str(self) -> &'static str {
         match self {
@@ -304,6 +320,11 @@ impl ActionKind {
             Self::SettingList => "setting.list",
             Self::SettingSet => "setting.set",
             Self::SettingToggle => "setting.toggle",
+            Self::DriveObjectCreate => "drive.object.create",
+            Self::DriveObjectUpdate => "drive.object.update",
+            Self::DriveObjectDelete => "drive.object.delete",
+            Self::DriveObjectInsert => "drive.object.insert",
+            Self::DriveObjectShareToTeam => "drive.object.share_to_team",
         }
     }
 
@@ -313,6 +334,15 @@ impl ActionKind {
                 Self::InstanceList | Self::AppPing | Self::AppVersion | Self::TabCreate => (
                     ActionImplementationStatus::Implemented,
                     false,
+                    vec![InvocationContext::OutsideWarp],
+                ),
+                Self::DriveObjectCreate
+                | Self::DriveObjectUpdate
+                | Self::DriveObjectDelete
+                | Self::DriveObjectInsert
+                | Self::DriveObjectShareToTeam => (
+                    ActionImplementationStatus::Implemented,
+                    true,
                     vec![InvocationContext::OutsideWarp],
                 ),
                 _ => (ActionImplementationStatus::Stub, true, Vec::new()),
@@ -369,7 +399,12 @@ impl ActionKind {
             | Self::InputModeSet
             | Self::WindowClose
             | Self::TabClose
-            | Self::PaneClose => RiskTier::MutatingDestructiveOrExecution,
+            | Self::PaneClose
+            | Self::DriveObjectCreate
+            | Self::DriveObjectUpdate
+            | Self::DriveObjectDelete
+            | Self::DriveObjectInsert
+            | Self::DriveObjectShareToTeam => RiskTier::MutatingDestructiveOrExecution,
             Self::AppFocus
             | Self::AppSettingsOpen
             | Self::AppCommandPaletteOpen
@@ -423,9 +458,15 @@ impl ActionKind {
             | Self::AppearanceSet
             | Self::AppearanceFontSize
             | Self::AppearanceZoom => StateDataCategory::MetadataConfigurationMutation,
-            Self::InputInsert | Self::InputReplace | Self::InputClear | Self::InputModeSet => {
-                StateDataCategory::UnderlyingDataMutation
-            }
+            Self::InputInsert
+            | Self::InputReplace
+            | Self::InputClear
+            | Self::InputModeSet
+            | Self::DriveObjectCreate
+            | Self::DriveObjectUpdate
+            | Self::DriveObjectDelete
+            | Self::DriveObjectInsert
+            | Self::DriveObjectShareToTeam => StateDataCategory::UnderlyingDataMutation,
             Self::AppFocus
             | Self::AppSettingsOpen
             | Self::AppCommandPaletteOpen
@@ -500,6 +541,11 @@ impl ActionKind {
             Self::SettingGet | Self::SettingList | Self::SettingSet | Self::SettingToggle => {
                 TargetScope::Settings
             }
+            Self::DriveObjectCreate
+            | Self::DriveObjectUpdate
+            | Self::DriveObjectDelete
+            | Self::DriveObjectInsert
+            | Self::DriveObjectShareToTeam => TargetScope::Drive,
             Self::AppSettingsOpen
             | Self::AppCommandPaletteOpen
             | Self::AppCommandSearchOpen

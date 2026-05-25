@@ -23,6 +23,7 @@ fn settings_with_values(
     outside_enabled: bool,
     outside_metadata_reads: bool,
     outside_app_state_mutations: bool,
+    outside_underlying_data_mutations: bool,
 ) -> LocalControlSettings {
     LocalControlSettings {
         allow_outside_warp_control: AllowOutsideWarpControl::new(Some(outside_enabled)),
@@ -38,16 +39,36 @@ fn settings_with_values(
         allow_outside_warp_metadata_configuration_mutations:
             AllowOutsideWarpMetadataConfigurationMutations::new(Some(false)),
         allow_outside_warp_underlying_data_mutations: AllowOutsideWarpUnderlyingDataMutations::new(
-            Some(false),
+            Some(outside_underlying_data_mutations),
         ),
     }
+}
+
+#[test]
+fn drive_object_mutations_require_underlying_data_mutation_permission() {
+    let denied = settings_with_values(true, true, true, false);
+    let err = ensure_settings_allow_action(
+        &denied,
+        InvocationContext::OutsideWarp,
+        ActionKind::DriveObjectCreate,
+    )
+    .expect_err("Drive mutation permission is disabled");
+    assert_eq!(err.code, ErrorCode::InsufficientPermissions);
+
+    let allowed = settings_with_values(true, false, false, true);
+    ensure_settings_allow_action(
+        &allowed,
+        InvocationContext::OutsideWarp,
+        ActionKind::DriveObjectCreate,
+    )
+    .expect("Drive mutation permission is enabled");
 }
 
 fn settings_with_outside_warp(
     outside_control: bool,
     outside_app_state_mutations: bool,
 ) -> LocalControlSettings {
-    settings_with_values(outside_control, false, outside_app_state_mutations)
+    settings_with_values(outside_control, false, outside_app_state_mutations, false)
 }
 
 #[test]
@@ -58,6 +79,7 @@ fn tab_create_accepts_default_and_active_targets() {
         window: Some(WindowTarget::Active),
         tab: Some(TabTarget::Active),
         pane: Some(PaneTarget::Active),
+        ..Default::default()
     })
     .expect("active target is accepted");
 }
@@ -70,6 +92,7 @@ fn tab_create_rejects_concrete_targets() {
         }),
         tab: None,
         pane: None,
+        ..Default::default()
     })
     .expect_err("concrete window target is rejected");
     assert_eq!(err.code, ErrorCode::StaleTarget);
@@ -80,6 +103,7 @@ fn tab_create_rejects_concrete_targets() {
             id: TabSelector("tab".to_owned()),
         }),
         pane: None,
+        ..Default::default()
     })
     .expect_err("concrete tab target is rejected");
     assert_eq!(err.code, ErrorCode::StaleTarget);
@@ -90,6 +114,7 @@ fn tab_create_rejects_concrete_targets() {
         pane: Some(PaneTarget::Id {
             id: PaneSelector("pane".to_owned()),
         }),
+        ..Default::default()
     })
     .expect_err("concrete pane target is rejected");
     assert_eq!(err.code, ErrorCode::StaleTarget);
@@ -101,6 +126,7 @@ fn tab_create_rejects_unsupported_selector_forms() {
         window: Some(WindowTarget::Index { index: 0 }),
         tab: None,
         pane: None,
+        ..Default::default()
     })
     .expect_err("indexed window target is rejected");
     assert_eq!(err.code, ErrorCode::InvalidSelector);
@@ -109,6 +135,7 @@ fn tab_create_rejects_unsupported_selector_forms() {
         window: None,
         tab: Some(TabTarget::Index { index: 0 }),
         pane: None,
+        ..Default::default()
     })
     .expect_err("indexed tab target is rejected");
     assert_eq!(err.code, ErrorCode::InvalidSelector);
@@ -123,6 +150,11 @@ fn capabilities_advertises_only_first_slice_core_actions() {
             ActionKind::AppPing,
             ActionKind::AppVersion,
             ActionKind::TabCreate,
+            ActionKind::DriveObjectCreate,
+            ActionKind::DriveObjectUpdate,
+            ActionKind::DriveObjectDelete,
+            ActionKind::DriveObjectInsert,
+            ActionKind::DriveObjectShareToTeam,
         ]
     );
 }
@@ -164,7 +196,7 @@ fn feature_flag_disabled_denies_local_control() {
 
 #[test]
 fn disabled_outside_warp_denies_before_granular_permission() {
-    let settings = settings_with_values(false, true, true);
+    let settings = settings_with_values(false, true, true, true);
 
     let err = ensure_settings_allow_action(
         &settings,
@@ -177,7 +209,7 @@ fn disabled_outside_warp_denies_before_granular_permission() {
 
 #[test]
 fn inside_warp_context_is_not_implemented() {
-    let settings = settings_with_values(true, true, true);
+    let settings = settings_with_values(true, true, true, true);
 
     let err = ensure_settings_allow_action(
         &settings,
@@ -190,7 +222,7 @@ fn inside_warp_context_is_not_implemented() {
 
 #[test]
 fn disabled_granular_permission_denies_with_insufficient_permissions() {
-    let settings = settings_with_values(true, true, false);
+    let settings = settings_with_values(true, true, false, false);
 
     let err = ensure_settings_allow_action(
         &settings,

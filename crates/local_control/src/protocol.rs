@@ -8,7 +8,8 @@ pub use crate::catalog::{
     StateDataCategory, TargetScope,
 };
 pub use crate::selectors::{
-    PaneSelector, PaneTarget, TabSelector, TabTarget, TargetSelector, WindowSelector, WindowTarget,
+    DriveObjectSelector, DriveObjectType, DriveTarget, PaneSelector, PaneTarget, TabSelector,
+    TabTarget, TargetSelector, WindowSelector, WindowTarget,
 };
 
 /// Top-level request sent by a local-control client to a Warp instance.
@@ -19,6 +20,61 @@ pub struct RequestEnvelope {
     #[serde(default)]
     pub target: TargetSelector,
     pub action: Action,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DriveCreateParams {
+    pub object_type: DriveObjectType,
+    pub name: String,
+    #[serde(default)]
+    pub content: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DriveUpdateParams {
+    pub object_type: DriveObjectType,
+    pub id: String,
+    #[serde(default)]
+    pub content: serde_json::Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriveDeleteParams {
+    pub object_type: DriveObjectType,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriveInsertParams {
+    pub object_type: DriveObjectType,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriveShareToTeamParams {
+    pub object_type: DriveObjectType,
+    pub id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriveObjectSummary {
+    pub object_type: DriveObjectType,
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriveMutationAudit {
+    pub action: String,
+    pub authenticated_user_subject: String,
+    pub permission_category: PermissionCategory,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DriveMutationResult {
+    pub object: DriveObjectSummary,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub audit: Option<DriveMutationAudit>,
 }
 
 impl RequestEnvelope {
@@ -46,6 +102,16 @@ impl Action {
             kind,
             params: serde_json::Value::Object(Default::default()),
         }
+    }
+
+    pub fn params_as<T: for<'de> Deserialize<'de>>(&self) -> Result<T, ControlError> {
+        serde_json::from_value(self.params.clone()).map_err(|err| {
+            ControlError::with_details(
+                ErrorCode::InvalidParams,
+                format!("invalid parameters for {}", self.kind.as_str()),
+                err.to_string(),
+            )
+        })
     }
 }
 

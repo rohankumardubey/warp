@@ -101,6 +101,30 @@ fn credential_request_rejects_unverified_inside_warp_context() {
 }
 
 #[test]
+fn authenticated_user_required_grants_need_subject() {
+    let mut grant = CredentialGrant::new(
+        InstanceId("inst_test".to_owned()),
+        ActionKind::DriveObjectCreate,
+        InvocationContext::OutsideWarp,
+        Duration::minutes(5),
+    );
+    assert!(grant.authenticated_user.required);
+    assert_eq!(
+        grant.permission_category,
+        PermissionCategory::MutateUnderlyingData
+    );
+    let err = grant
+        .verify_for_action(ActionKind::DriveObjectCreate)
+        .expect_err("missing authenticated user subject is rejected");
+    assert_eq!(err.code, ErrorCode::AuthenticatedUserRequired);
+
+    grant.authenticated_user.subject = Some("user_test".to_owned());
+    grant
+        .verify_for_action(ActionKind::DriveObjectCreate)
+        .expect("authenticated user subject satisfies grant");
+}
+
+#[test]
 fn credential_request_rejects_placeholder_inside_warp_terminal_proof() {
     let mut request = CredentialRequest::new(ActionKind::TabCreate, InvocationContext::InsideWarp);
     request.execution_context_proof = Some(ExecutionContextProof::VerifiedWarpTerminal {

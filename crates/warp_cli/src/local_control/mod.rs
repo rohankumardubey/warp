@@ -10,7 +10,7 @@ use crate::agent::OutputFormat;
 use clap::{Args, CommandFactory, FromArgMatches, Parser, Subcommand};
 use clap_complete::aot::Shell;
 
-use commands::{run_app_command, run_instance_command, run_tab_command};
+use commands::{run_app_command, run_drive_command, run_instance_command, run_tab_command};
 use completions::generate_completions_to_stdout;
 use output::write_control_error;
 
@@ -75,6 +75,10 @@ pub enum ControlCommand {
     #[command(subcommand)]
     Tab(TabCommand),
 
+    /// Mutate authenticated Warp Drive objects.
+    #[command(subcommand)]
+    Drive(DriveCommand),
+
     /// Generate shell completions for your shell to stdout.
     ///
     /// For bash, add the following to ~/.bashrc:
@@ -122,6 +126,92 @@ pub enum TabCommand {
     Create(TargetArgs),
 }
 
+/// Commands that operate on Warp Drive.
+#[derive(Debug, Clone, Subcommand)]
+pub enum DriveCommand {
+    /// Mutate a Warp Drive object.
+    #[command(subcommand)]
+    Object(DriveObjectCommand),
+}
+
+/// Commands that mutate Warp Drive objects.
+#[derive(Debug, Clone, Subcommand)]
+pub enum DriveObjectCommand {
+    /// Create a new personal Warp Drive object.
+    Create(DriveCreateArgs),
+    /// Update an existing Warp Drive object by id.
+    Update(DriveObjectContentArgs),
+    /// Delete an existing Warp Drive object by id.
+    Delete(DriveObjectIdArgs),
+    /// Insert an existing Warp Drive object into a supported target.
+    Insert(DriveObjectIdArgs),
+    /// Share a personal server-backed object to the current user's team.
+    #[command(name = "share-to-team")]
+    ShareToTeam(DriveObjectIdArgs),
+}
+
+/// Arguments for Drive object creation.
+#[derive(Debug, Clone, Args)]
+pub struct DriveCreateArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Drive object type.
+    #[arg(long = "type")]
+    pub object_type: DriveCliObjectType,
+
+    /// Object name.
+    #[arg(long)]
+    pub name: String,
+
+    /// JSON content payload, or raw text for notebook content.
+    #[arg(long, default_value = "{}")]
+    pub content: String,
+}
+
+/// Arguments for Drive object update.
+#[derive(Debug, Clone, Args)]
+pub struct DriveObjectContentArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Drive object type.
+    #[arg(long = "type")]
+    pub object_type: DriveCliObjectType,
+
+    /// Stable Drive object id.
+    pub id: String,
+
+    /// JSON content payload, or raw text for notebook content.
+    #[arg(long, default_value = "{}")]
+    pub content: String,
+}
+
+/// Arguments for Drive object id mutations.
+#[derive(Debug, Clone, Args)]
+pub struct DriveObjectIdArgs {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    /// Drive object type.
+    #[arg(long = "type")]
+    pub object_type: DriveCliObjectType,
+
+    /// Stable Drive object id.
+    pub id: String,
+}
+
+/// CLI-facing Drive object type values.
+#[derive(Debug, Copy, Clone, clap::ValueEnum)]
+pub enum DriveCliObjectType {
+    Workflow,
+    Notebook,
+    #[value(name = "env-var-collection")]
+    EnvVarCollection,
+    Prompt,
+    Folder,
+}
+
 /// Common flags for selecting which running Warp instance receives a command.
 #[derive(Debug, Clone, Args, Default)]
 pub struct TargetArgs {
@@ -156,6 +246,7 @@ fn run_inner(args: ControlArgs) -> Result<(), local_control::protocol::ControlEr
         ControlCommand::Instance(command) => run_instance_command(command, output_format),
         ControlCommand::App(command) => run_app_command(command, output_format),
         ControlCommand::Tab(command) => run_tab_command(command, output_format),
+        ControlCommand::Drive(command) => run_drive_command(command, output_format),
         ControlCommand::Completions { shell } => generate_completions_to_stdout(shell),
     }
 }
