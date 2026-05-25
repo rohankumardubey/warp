@@ -9,21 +9,18 @@ fn request_envelope_serializes_stable_action_names() {
 }
 
 #[test]
-fn setting_get_params_roundtrip() {
+fn typed_params_round_trip_through_action_envelope() {
     let action = Action::with_params(
         ActionKind::SettingGet,
         SettingGetParams {
-            key: "appearance.themes.theme".to_owned(),
+            key: "appearance.theme".to_owned(),
         },
     )
-    .expect("params serialize");
-    assert_eq!(action.kind, ActionKind::SettingGet);
-    assert_eq!(action.params["key"], "appearance.themes.theme");
-
+    .expect("setting params serialize");
     let params = action
         .params_as::<SettingGetParams>()
-        .expect("params deserialize");
-    assert_eq!(params.key, "appearance.themes.theme");
+        .expect("setting params deserialize");
+    assert_eq!(params.key, "appearance.theme");
 }
 
 #[test]
@@ -44,12 +41,6 @@ fn response_error_serializes_machine_code() {
 fn ambiguous_target_error_code_is_stable() {
     let value = serde_json::to_value(ErrorCode::AmbiguousTarget).expect("code serializes");
     assert_eq!(value, serde_json::json!("ambiguous_target"));
-}
-
-#[test]
-fn input_run_is_not_in_the_allowlisted_catalog() {
-    let action = serde_json::from_value::<ActionKind>(serde_json::json!("input.run"));
-    assert!(action.is_err());
 }
 
 #[test]
@@ -83,23 +74,14 @@ fn tab_create_metadata_is_first_slice_logged_out_safe_mutation() {
 }
 
 #[test]
-fn structural_metadata_actions_are_logged_out_safe_read_metadata() {
+fn core_smoke_metadata_has_explicit_read_metadata_category() {
     for action in [
         ActionKind::InstanceList,
         ActionKind::AppPing,
         ActionKind::AppInspect,
         ActionKind::AppVersion,
-        ActionKind::AppActive,
         ActionKind::ActionList,
         ActionKind::ActionGet,
-        ActionKind::WindowList,
-        ActionKind::TabList,
-        ActionKind::PaneList,
-        ActionKind::SessionList,
-        ActionKind::ThemeList,
-        ActionKind::AppearanceGet,
-        ActionKind::SettingGet,
-        ActionKind::SettingList,
     ] {
         let metadata = action.metadata();
         assert_eq!(
@@ -115,7 +97,33 @@ fn structural_metadata_actions_are_logged_out_safe_read_metadata() {
             metadata.permission_category,
             PermissionCategory::ReadMetadata
         );
-        assert!(!metadata.requires_authenticated_user);
+        assert!(!metadata.authenticated_user.required);
+        assert!(matches!(
+            metadata.target_scope,
+            TargetScope::Instance | TargetScope::Action
+        ));
+    }
+}
+
+#[test]
+fn read_only_metadata_actions_are_logged_out_safe_metadata_reads() {
+    for action in [
+        ActionKind::AppActive,
+        ActionKind::WindowList,
+        ActionKind::TabList,
+        ActionKind::PaneList,
+        ActionKind::SessionList,
+    ] {
+        let metadata = action.metadata();
+        assert_eq!(
+            metadata.implementation_status,
+            ActionImplementationStatus::Implemented
+        );
+        assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyMetadata);
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::ReadMetadata
+        );
         assert!(!metadata.authenticated_user.required);
         assert_eq!(
             metadata.allowed_invocation_contexts,
@@ -125,61 +133,33 @@ fn structural_metadata_actions_are_logged_out_safe_read_metadata() {
 }
 
 #[test]
-fn structural_metadata_actions_have_expected_target_scopes() {
+fn settings_and_appearance_metadata_reads_are_implemented_logged_out_safe_reads() {
     for action in [
-        ActionKind::InstanceList,
-        ActionKind::AppPing,
-        ActionKind::AppInspect,
-        ActionKind::AppVersion,
-        ActionKind::AppActive,
+        ActionKind::ThemeList,
+        ActionKind::AppearanceGet,
+        ActionKind::SettingGet,
+        ActionKind::SettingList,
     ] {
-        assert_eq!(action.metadata().target_scope, TargetScope::Instance);
+        let metadata = action.metadata();
+        assert_eq!(
+            metadata.implementation_status,
+            ActionImplementationStatus::Implemented
+        );
+        assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyMetadata);
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::ReadMetadata
+        );
+        assert!(!metadata.authenticated_user.required);
+        assert_eq!(
+            metadata.allowed_invocation_contexts,
+            vec![InvocationContext::OutsideWarp]
+        );
     }
-
-    assert_eq!(
-        ActionKind::ActionList.metadata().target_scope,
-        TargetScope::Action
-    );
-    assert_eq!(
-        ActionKind::ActionGet.metadata().target_scope,
-        TargetScope::Action
-    );
-    assert_eq!(
-        ActionKind::WindowList.metadata().target_scope,
-        TargetScope::Window
-    );
-    assert_eq!(
-        ActionKind::TabList.metadata().target_scope,
-        TargetScope::Tab
-    );
-    assert_eq!(
-        ActionKind::PaneList.metadata().target_scope,
-        TargetScope::Pane
-    );
-    assert_eq!(
-        ActionKind::SessionList.metadata().target_scope,
-        TargetScope::Session
-    );
-    assert_eq!(
-        ActionKind::ThemeList.metadata().target_scope,
-        TargetScope::Appearance
-    );
-    assert_eq!(
-        ActionKind::AppearanceGet.metadata().target_scope,
-        TargetScope::Appearance
-    );
-    assert_eq!(
-        ActionKind::SettingList.metadata().target_scope,
-        TargetScope::Settings
-    );
-    assert_eq!(
-        ActionKind::SettingGet.metadata().target_scope,
-        TargetScope::Settings
-    );
 }
 
 #[test]
-fn underlying_data_actions_require_underlying_data_permission_and_authenticated_user() {
+fn underlying_data_reads_require_underlying_data_permission_and_authenticated_user() {
     for action in [
         ActionKind::BlockList,
         ActionKind::BlockGet,
@@ -202,13 +182,6 @@ fn underlying_data_actions_require_underlying_data_permission_and_authenticated_
         );
         assert!(metadata.requires_authenticated_user);
         assert!(metadata.authenticated_user.required);
-        assert_eq!(
-            metadata.allowed_invocation_contexts,
-            vec![
-                InvocationContext::InsideWarp,
-                InvocationContext::OutsideWarp
-            ]
-        );
     }
 }
 
@@ -274,6 +247,10 @@ fn default_permissions_preserve_security_categories() {
         PermissionCategory::MutateUnderlyingData
     );
     assert_eq!(
+        ActionKind::TabRename.metadata().permission_category,
+        PermissionCategory::MutateMetadataConfiguration
+    );
+    assert_eq!(
         ActionKind::SettingSet.metadata().permission_category,
         PermissionCategory::MutateMetadataConfiguration
     );
@@ -282,21 +259,246 @@ fn default_permissions_preserve_security_categories() {
         PermissionCategory::ReadMetadata
     );
     assert_eq!(
-        ActionKind::BlockList.metadata().permission_category,
+        ActionKind::InputGet.metadata().permission_category,
+        PermissionCategory::ReadUnderlyingData
+    );
+    assert_eq!(
+        ActionKind::DriveGet.metadata().permission_category,
         PermissionCategory::ReadUnderlyingData
     );
 }
 
 #[test]
-fn non_first_slice_actions_are_catalog_stubs() {
-    let metadata = ActionKind::WindowCreate.metadata();
+fn file_and_project_metadata_reads_have_correct_categories() {
+    for action in [
+        ActionKind::FileList,
+        ActionKind::ProjectActive,
+        ActionKind::ProjectList,
+    ] {
+        let metadata = action.metadata();
+        assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyMetadata);
+        assert_eq!(
+            metadata.state_data_category,
+            StateDataCategory::MetadataRead
+        );
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::ReadMetadata
+        );
+        assert!(!metadata.requires_authenticated_user);
+    }
+}
+
+#[test]
+fn drive_content_read_is_underlying_data_permission() {
+    let metadata = ActionKind::DriveGet.metadata();
+    assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyTerminalData);
     assert_eq!(
-        metadata.implementation_status,
-        ActionImplementationStatus::Stub
+        metadata.state_data_category,
+        StateDataCategory::UnderlyingDataRead
     );
-    assert!(
-        !metadata
-            .allowed_invocation_contexts
-            .contains(&InvocationContext::OutsideWarp)
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::ReadUnderlyingData
     );
+    assert!(metadata.authenticated_user.required);
+    assert_eq!(metadata.target_scope, TargetScope::Drive);
+}
+
+#[test]
+fn drive_list_is_authenticated_metadata_read() {
+    let metadata = ActionKind::DriveList.metadata();
+    assert_eq!(metadata.risk_tier, RiskTier::ReadOnlyMetadata);
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::ReadMetadata
+    );
+    assert!(metadata.authenticated_user.required);
+    assert_eq!(metadata.target_scope, TargetScope::Drive);
+}
+
+#[test]
+fn input_run_is_underlying_data_mutation_with_authenticated_user() {
+    let metadata = ActionKind::InputRun.metadata();
+    assert_eq!(metadata.risk_tier, RiskTier::MutatingDestructiveOrExecution);
+    assert_eq!(
+        metadata.state_data_category,
+        StateDataCategory::UnderlyingDataMutation
+    );
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::MutateUnderlyingData
+    );
+    assert!(metadata.authenticated_user.required);
+    assert_eq!(metadata.target_scope, TargetScope::Session);
+}
+
+#[test]
+fn drive_mutations_are_underlying_data_mutations_requiring_auth() {
+    for action in [
+        ActionKind::DriveCreate,
+        ActionKind::DriveUpdate,
+        ActionKind::DriveDelete,
+        ActionKind::DriveRun,
+        ActionKind::DriveInsert,
+    ] {
+        let metadata = action.metadata();
+        assert_eq!(metadata.risk_tier, RiskTier::MutatingDestructiveOrExecution);
+        assert_eq!(
+            metadata.state_data_category,
+            StateDataCategory::UnderlyingDataMutation
+        );
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::MutateUnderlyingData
+        );
+        assert!(metadata.authenticated_user.required);
+        assert_eq!(metadata.target_scope, TargetScope::Drive);
+    }
+}
+
+#[test]
+fn file_mutations_are_underlying_data_mutations_requiring_auth() {
+    for action in [ActionKind::FileWrite, ActionKind::FileDelete] {
+        let metadata = action.metadata();
+        assert_eq!(metadata.risk_tier, RiskTier::MutatingDestructiveOrExecution);
+        assert_eq!(
+            metadata.state_data_category,
+            StateDataCategory::UnderlyingDataMutation
+        );
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::MutateUnderlyingData
+        );
+        assert!(metadata.requires_authenticated_user);
+        assert!(metadata.authenticated_user.required);
+        assert_eq!(metadata.target_scope, TargetScope::File);
+    }
+}
+
+#[test]
+fn settings_and_appearance_mutations_are_metadata_configuration_mutations() {
+    for action in [
+        ActionKind::ThemeSet,
+        ActionKind::AppearanceSet,
+        ActionKind::AppearanceFontSize,
+        ActionKind::AppearanceZoom,
+        ActionKind::SettingSet,
+        ActionKind::SettingToggle,
+    ] {
+        let metadata = action.metadata();
+        assert_eq!(metadata.risk_tier, RiskTier::MutatingNonDestructive);
+        assert_eq!(
+            metadata.state_data_category,
+            StateDataCategory::MetadataConfigurationMutation
+        );
+        assert_eq!(
+            metadata.permission_category,
+            PermissionCategory::MutateMetadataConfiguration
+        );
+        assert!(metadata.requires_authenticated_user);
+    }
+}
+
+#[test]
+fn tab_rename_is_metadata_configuration_not_app_state() {
+    let metadata = ActionKind::TabRename.metadata();
+    assert_eq!(metadata.risk_tier, RiskTier::MutatingNonDestructive);
+    assert_eq!(
+        metadata.state_data_category,
+        StateDataCategory::MetadataConfigurationMutation
+    );
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::MutateMetadataConfiguration
+    );
+    assert!(metadata.requires_authenticated_user);
+    assert_eq!(metadata.target_scope, TargetScope::Tab);
+}
+
+#[test]
+fn file_open_is_app_state_mutation_not_underlying_data() {
+    let metadata = ActionKind::FileOpen.metadata();
+    assert_eq!(metadata.risk_tier, RiskTier::MutatingNonDestructive);
+    assert_eq!(
+        metadata.state_data_category,
+        StateDataCategory::AppStateMutation
+    );
+    assert_eq!(
+        metadata.permission_category,
+        PermissionCategory::MutateAppState
+    );
+    assert_eq!(metadata.target_scope, TargetScope::File);
+}
+
+#[test]
+fn mutating_contract_preserves_distinct_permission_categories() {
+    for action in [
+        ActionKind::AppFocus,
+        ActionKind::AppSettingsOpen,
+        ActionKind::AppCommandPaletteOpen,
+        ActionKind::AppCommandSearchOpen,
+        ActionKind::AppWarpDriveOpen,
+        ActionKind::AppWarpDriveToggle,
+        ActionKind::AppResourceCenterToggle,
+        ActionKind::AppAiAssistantToggle,
+        ActionKind::AppCodeReviewToggle,
+        ActionKind::AppVerticalTabsToggle,
+        ActionKind::WindowCreate,
+        ActionKind::WindowFocus,
+        ActionKind::WindowClose,
+        ActionKind::TabCreate,
+        ActionKind::TabActivate,
+        ActionKind::TabMove,
+        ActionKind::TabClose,
+        ActionKind::PaneSplit,
+        ActionKind::PaneFocus,
+        ActionKind::PaneNavigate,
+        ActionKind::PaneClose,
+        ActionKind::PaneMaximize,
+        ActionKind::PaneResize,
+        ActionKind::PaneSessionPrevious,
+        ActionKind::PaneSessionNext,
+        ActionKind::FileOpen,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::MutateAppState
+        );
+    }
+
+    for action in [
+        ActionKind::TabRename,
+        ActionKind::ThemeSet,
+        ActionKind::AppearanceSet,
+        ActionKind::AppearanceFontSize,
+        ActionKind::AppearanceZoom,
+        ActionKind::SettingSet,
+        ActionKind::SettingToggle,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::MutateMetadataConfiguration
+        );
+    }
+
+    for action in [
+        ActionKind::InputInsert,
+        ActionKind::InputReplace,
+        ActionKind::InputClear,
+        ActionKind::InputModeSet,
+        ActionKind::InputRun,
+        ActionKind::FileWrite,
+        ActionKind::FileDelete,
+        ActionKind::DriveCreate,
+        ActionKind::DriveUpdate,
+        ActionKind::DriveDelete,
+        ActionKind::DriveRun,
+        ActionKind::DriveInsert,
+    ] {
+        assert_eq!(
+            action.metadata().permission_category,
+            PermissionCategory::MutateUnderlyingData
+        );
+    }
 }

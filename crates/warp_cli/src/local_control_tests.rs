@@ -24,7 +24,7 @@ fn restore_discovery_dir(previous: Option<OsString>) {
 }
 
 #[test]
-fn parses_tab_create() {
+fn parses_first_slice_tab_create() {
     let args = ControlArgs::try_parse_from(["warpctrl", "tab", "create", "--instance", "inst_123"])
         .expect("tab create parses");
     let ControlCommand::Tab(TabCommand::Create(target)) = args.command else {
@@ -34,7 +34,7 @@ fn parses_tab_create() {
 }
 
 #[test]
-fn parses_instance_list() {
+fn parses_first_slice_instance_list() {
     let args = ControlArgs::try_parse_from(["warpctrl", "instance", "list"])
         .expect("instance list parses");
     assert!(matches!(
@@ -81,7 +81,7 @@ fn parses_settings_and_appearance_metadata_commands() {
 }
 
 #[test]
-fn parses_app_metadata_commands() {
+fn parses_first_slice_app_smoke_metadata_commands() {
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "ping"]).is_ok());
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "version"]).is_ok());
     assert!(ControlArgs::try_parse_from(["warpctrl", "app", "active"]).is_ok());
