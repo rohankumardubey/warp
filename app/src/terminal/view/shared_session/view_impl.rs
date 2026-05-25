@@ -12,10 +12,10 @@ use settings::Setting as _;
 use warp_core::features::FeatureFlag;
 use warp_core::semantic_selection::SemanticSelection;
 use warp_core::ui::appearance::Appearance;
-use warpui::r#async::Timer;
 use warpui::clipboard::ClipboardContent;
 use warpui::elements::MouseStateHandle;
 use warpui::platform::Cursor;
+use warpui::r#async::Timer;
 use warpui::ui_components::button::ButtonVariant;
 use warpui::ui_components::components::UiComponent;
 use warpui::units::IntoLines;
@@ -23,11 +23,11 @@ use warpui::{AppContext, Element, ModelHandle, SingletonEntity, ViewContext};
 
 use super::adapter::{Adapter, Kind, Participant};
 use super::cloud_conversation_continuation::{
-    CloudConversationContinuationUiState, TombstoneCta, conversation_failed_before_task_creation,
-    resolve_cloud_conversation_continuation_ui_state,
+    conversation_failed_before_task_creation, resolve_cloud_conversation_continuation_ui_state,
+    CloudConversationContinuationUiState, TombstoneCta,
 };
-use super::sharer::Sharer;
 use super::sharer::inactivity_modal::InactivityModalEvent;
+use super::sharer::Sharer;
 use super::viewer::Viewer;
 use super::{ConversationEndedTombstoneEvent, ConversationEndedTombstoneView};
 use crate::ai::agent_conversations_model::AgentConversationsModel;
@@ -40,7 +40,6 @@ use crate::editor::{InteractionState, ReplicaId};
 use crate::menu::{Event as MenuEvent, MenuItem, MenuItemFields};
 use crate::server::telemetry::SharingDialogSource;
 use crate::settings::InputModeSettings;
-use crate::terminal::TerminalModel;
 use crate::terminal::block_list_viewport::ScrollPositionUpdate;
 use crate::terminal::model::blocks::BlockListPoint;
 use crate::terminal::model::index::Point;
@@ -58,16 +57,17 @@ use crate::terminal::shared_session::role_change_modal::{
 };
 use crate::terminal::shared_session::settings::SharedSessionSettings;
 use crate::terminal::shared_session::{
-    COPY_LINK_TEXT, SharedSessionActionSource, SharedSessionScrollbackType, SharedSessionSource,
-    SharedSessionStatus, join_link,
+    join_link, SharedSessionActionSource, SharedSessionScrollbackType, SharedSessionSource,
+    SharedSessionStatus, COPY_LINK_TEXT,
 };
 use crate::terminal::view::{
     ContextMenuAction, Event, InlineBannerItem, InlineBannerType, PendingUserQueryKind,
     RichContentInsertionPosition, SharedSessionBanners, SizeUpdateBuilder, TerminalAction,
     TerminalView,
 };
+use crate::terminal::TerminalModel;
 use crate::view_components::{DismissibleToast, ToastFlavor};
-use crate::{TelemetryEvent, send_telemetry_from_ctx};
+use crate::{send_telemetry_from_ctx, TelemetryEvent};
 
 impl TerminalView {
     pub fn sharer_session_kind(&self) -> Option<&Kind> {
