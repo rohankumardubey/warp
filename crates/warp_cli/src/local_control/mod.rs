@@ -348,6 +348,12 @@ pub enum SettingCommand {
 
     /// Read one allowlisted setting.
     Get(SettingGetArgs),
+
+    /// Set one allowlisted setting.
+    Set(SettingSetArgsCli),
+
+    /// Toggle one allowlisted boolean setting.
+    Toggle(SettingToggleArgsCli),
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -434,6 +440,24 @@ pub struct SettingGetArgs {
     pub target: TargetArgs,
 
     /// Allowlisted setting key.
+    pub key: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SettingSetArgsCli {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
+    pub key: String,
+
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Args)]
+pub struct SettingToggleArgsCli {
+    #[command(flatten)]
+    pub target: TargetArgs,
+
     pub key: String,
 }
 

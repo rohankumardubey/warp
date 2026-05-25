@@ -182,8 +182,9 @@ fn parses_completion_generation_command() {
 }
 
 #[test]
-fn rejects_non_metadata_and_future_catalog_commands_not_in_this_shard() {
-    assert!(ControlArgs::try_parse_from(["warpctrl", "drive", "list"]).is_err());
+fn rejects_unknown_top_level_subcommands() {
+    assert!(ControlArgs::try_parse_from(["warpctrl", "notebook", "list"]).is_err());
+    assert!(ControlArgs::try_parse_from(["warpctrl", "run", "my-workflow"]).is_err());
 }
 
 #[test]
