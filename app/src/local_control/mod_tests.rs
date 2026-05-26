@@ -150,15 +150,25 @@ fn outside_warp_requires_everywhere_mode() {
 }
 
 #[test]
-fn inside_warp_context_is_not_implemented() {
-    let settings = settings_with_mode(LocalControlMode::EnabledWithinWarp);
+fn enabled_within_warp_allows_inside_warp_context() {
+    ensure_settings_allow_action(
+        &settings_with_mode(LocalControlMode::EnabledWithinWarp),
+        InvocationContext::InsideWarp,
+        ActionKind::InputRun,
+    )
+    .expect("inside-Warp local control is enabled");
+}
+
+#[test]
+fn outside_warp_authenticated_actions_are_execution_context_denied() {
+    let settings = settings_with_mode(LocalControlMode::EnabledEverywhere);
 
     let err = ensure_settings_allow_action(
         &settings,
-        InvocationContext::InsideWarp,
-        ActionKind::TabCreate,
+        InvocationContext::OutsideWarp,
+        ActionKind::InputRun,
     )
-    .expect_err("inside-Warp grants are not implemented");
+    .expect_err("outside-Warp authenticated action is rejected");
     assert_eq!(err.code, ErrorCode::ExecutionContextNotAllowed);
 }
 
