@@ -8,4 +8,6 @@ license = "MIT"
 
 [dependencies]
 crossterm.workspace = true
+unicode-segmentation = "1.11.0"
+unicode-width.workspace = true
 warpui_core.workspace = true

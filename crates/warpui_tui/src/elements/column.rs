@@ -79,12 +79,28 @@ impl TuiElement for TuiColumn {
     fn dispatch_event(
         &mut self,
         event: &Event,
+        area: TuiRect,
         ctx: &mut TuiEventContext,
         app: &AppContext,
     ) -> bool {
+        let mut child_areas = Vec::with_capacity(self.children.len());
+        let mut y = area.y;
+        for child in &self.children {
+            if y >= area.bottom() {
+                break;
+            }
+
+            let child_height = child
+                .desired_height(area.width)
+                .min(area.bottom().saturating_sub(y));
+            child_areas.push(TuiRect::new(area.x, y, area.width, child_height));
+            y = y.saturating_add(child_height);
+        }
+
         self.children
             .iter_mut()
+            .zip(child_areas)
             .rev()
-            .any(|child| child.dispatch_event(event, ctx, app))
+            .any(|(child, child_area)| child.dispatch_event(event, child_area, ctx, app))
     }
 }

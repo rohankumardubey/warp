@@ -58,7 +58,8 @@ impl TuiPresenter {
         };
 
         let mut event_ctx = TuiEventContext::default();
-        let handled = app.read(|ctx| root.dispatch_event(event, &mut event_ctx, ctx));
+        let handled =
+            app.read(|ctx| root.dispatch_event(event, self.root_area, &mut event_ctx, ctx));
         self.root = Some(root);
 
         for update in event_ctx.take_updates() {
@@ -78,11 +79,14 @@ impl Default for TuiPresenter {
 #[cfg(test)]
 mod tests {
     use warpui_core::event::KeyEventDetails;
+    use warpui_core::geometry::vector::vec2f;
     use warpui_core::keymap::Keystroke;
     use warpui_core::{App, Entity, Event, ModelHandle};
 
     use super::*;
-    use crate::elements::{TuiContainer, TuiEventHandler, TuiText};
+    use crate::elements::{
+        TuiContainer, TuiEventHandler, TuiMouseArea, TuiMouseStateHandle, TuiText,
+    };
     use crate::TuiDispatchEventResult;
 
     struct GreetingModel {
@@ -150,6 +154,53 @@ mod tests {
         }
     }
 
+    struct ClickModel {
+        click_count: usize,
+    }
+
+    impl Entity for ClickModel {
+        type Event = ();
+    }
+
+    struct ClickView {
+        model: ModelHandle<ClickModel>,
+        mouse_state: TuiMouseStateHandle,
+    }
+
+    impl Entity for ClickView {
+        type Event = ();
+    }
+
+    impl TuiView for ClickView {
+        type RenderOutput = Box<dyn crate::elements::TuiElement>;
+
+        fn ui_name() -> &'static str {
+            "ClickView"
+        }
+
+        fn render_tui(&self, _: &AppContext) -> Box<dyn crate::elements::TuiElement> {
+            let model = self.model.clone();
+            Box::new(
+                TuiMouseArea::new(self.mouse_state.clone(), |state| {
+                    let label = if state.is_clicked() {
+                        "pressed"
+                    } else {
+                        "click me"
+                    };
+                    Box::new(TuiText::new(label))
+                })
+                .on_click(move |ctx, _, _| {
+                    let model = model.clone();
+                    ctx.dispatch_app_update(move |app| {
+                        model.update(app, |model, _| {
+                            model.click_count += 1;
+                        });
+                    });
+                }),
+            )
+        }
+    }
+
     #[test]
     fn renders_view_from_shared_model_state() {
         App::test((), |mut app| async move {
@@ -211,6 +262,41 @@ mod tests {
                 model.read(&app, |model, _| model.greeting.clone()),
                 "event handled"
             );
+        });
+    }
+
+    #[test]
+    fn dispatches_clicks_to_mouse_area() {
+        App::test((), |mut app| async move {
+            let model = app.add_model(|_| ClickModel { click_count: 0 });
+            let mouse_state = TuiMouseStateHandle::default();
+            let (_, view) = app.add_tui_window(|_| ClickView {
+                model: model.clone(),
+                mouse_state,
+            });
+
+            let mut presenter = TuiPresenter::new();
+            app.read(|ctx| {
+                view.read(ctx, |view, ctx| {
+                    presenter.render_view(view, ctx, TuiSize::new(8, 1));
+                })
+            });
+
+            let down = Event::LeftMouseDown {
+                position: vec2f(2.0, 0.0),
+                modifiers: Default::default(),
+                click_count: 1,
+                is_first_mouse: false,
+            };
+            let up = Event::LeftMouseUp {
+                position: vec2f(2.0, 0.0),
+                modifiers: Default::default(),
+            };
+
+            assert!(presenter.dispatch_event(&down, &mut app).handled);
+            assert_eq!(model.read(&app, |model, _| model.click_count), 0);
+            assert!(presenter.dispatch_event(&up, &mut app).handled);
+            assert_eq!(model.read(&app, |model, _| model.click_count), 1);
         });
     }
 }

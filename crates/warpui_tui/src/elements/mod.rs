@@ -1,11 +1,13 @@
 mod column;
 mod container;
 mod event_handler;
+mod mouse_area;
 mod text;
 
 pub use column::TuiColumn;
 pub use container::TuiContainer;
 pub use event_handler::TuiEventHandler;
+pub use mouse_area::{TuiMouseArea, TuiMouseState, TuiMouseStateHandle};
 pub use text::TuiText;
 use warpui_core::{AppContext, Event};
 
@@ -25,6 +27,7 @@ pub trait TuiElement {
     fn dispatch_event(
         &mut self,
         _event: &Event,
+        _area: TuiRect,
         _ctx: &mut TuiEventContext,
         _app: &AppContext,
     ) -> bool {

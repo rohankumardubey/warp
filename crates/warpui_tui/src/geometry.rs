@@ -1,3 +1,5 @@
+use warpui_core::geometry::vector::Vector2F;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct TuiSize {
     pub width: u16,
@@ -48,6 +50,13 @@ impl TuiRect {
             width: self.width.saturating_sub(inset_width),
             height: self.height.saturating_sub(inset_width),
         }
+    }
+
+    pub fn contains_position(self, position: Vector2F) -> bool {
+        position.x() >= f32::from(self.x)
+            && position.x() < f32::from(self.right())
+            && position.y() >= f32::from(self.y)
+            && position.y() < f32::from(self.bottom())
     }
 }
 

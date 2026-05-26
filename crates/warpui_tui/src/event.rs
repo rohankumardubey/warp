@@ -17,6 +17,20 @@ pub struct TuiEventDispatchResult {
     pub handled: bool,
 }
 
+pub fn vertical_scroll_lines(delta: Vector2F) -> i16 {
+    let y = delta.y();
+    if y == 0.0 || !y.is_finite() {
+        return 0;
+    }
+
+    let lines = y.abs().ceil().min(f32::from(i16::MAX)) as i16;
+    if y.is_sign_positive() {
+        lines
+    } else {
+        -lines
+    }
+}
+
 #[derive(Default)]
 pub struct TuiEventContext {
     updates: Vec<Box<dyn FnOnce(&mut App)>>,
@@ -190,5 +204,39 @@ fn modifiers_state(modifiers: KeyModifiers) -> ModifiersState {
         shift: modifiers.contains(KeyModifiers::SHIFT),
         ctrl: modifiers.contains(KeyModifiers::CONTROL),
         func: false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crossterm::event::{KeyModifiers, MouseEvent, MouseEventKind};
+
+    use super::*;
+
+    #[test]
+    fn mouse_wheel_ticks_are_normalized_to_single_line_deltas() {
+        let event = mouse_event_to_warp_event(MouseEvent {
+            kind: MouseEventKind::ScrollUp,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::empty(),
+        });
+
+        let Some(Event::ScrollWheel { delta, .. }) = event else {
+            panic!("expected scroll wheel event");
+        };
+        assert_eq!(vertical_scroll_lines(delta), 1);
+
+        let event = mouse_event_to_warp_event(MouseEvent {
+            kind: MouseEventKind::ScrollDown,
+            column: 0,
+            row: 0,
+            modifiers: KeyModifiers::empty(),
+        });
+
+        let Some(Event::ScrollWheel { delta, .. }) = event else {
+            panic!("expected scroll wheel event");
+        };
+        assert_eq!(vertical_scroll_lines(delta), -1);
     }
 }

@@ -2,9 +2,7 @@ use warpui_core::keymap::Keystroke;
 use warpui_core::{AppContext, Event};
 
 use crate::elements::TuiElement;
-use crate::{
-    TuiBuffer, TuiConstraint, TuiDispatchEventResult, TuiEventContext, TuiRect, TuiSize,
-};
+use crate::{TuiBuffer, TuiConstraint, TuiDispatchEventResult, TuiEventContext, TuiRect, TuiSize};
 
 type TuiEventCallback =
     dyn FnMut(&mut TuiEventContext, &AppContext, &Event) -> TuiDispatchEventResult;
@@ -63,10 +61,11 @@ impl TuiElement for TuiEventHandler {
     fn dispatch_event(
         &mut self,
         event: &Event,
+        area: TuiRect,
         ctx: &mut TuiEventContext,
         app: &AppContext,
     ) -> bool {
-        if self.child.dispatch_event(event, ctx, app) {
+        if self.child.dispatch_event(event, area, ctx, app) {
             return true;
         }
 

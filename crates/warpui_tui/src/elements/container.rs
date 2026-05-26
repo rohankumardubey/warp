@@ -97,9 +97,11 @@ impl TuiElement for TuiContainer {
     fn dispatch_event(
         &mut self,
         event: &Event,
+        area: TuiRect,
         ctx: &mut TuiEventContext,
         app: &AppContext,
     ) -> bool {
-        self.child.dispatch_event(event, ctx, app)
+        self.child
+            .dispatch_event(event, self.child_area(area), ctx, app)
     }
 }

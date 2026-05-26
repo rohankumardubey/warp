@@ -123,6 +123,12 @@ impl App {
         self.0.borrow().has_window_invalidations(window_id)
     }
 
+    pub fn take_window_invalidations(&self, window_id: WindowId) -> WindowInvalidation {
+        self.0
+            .borrow_mut()
+            .take_all_invalidations_for_window(window_id)
+    }
+
     pub fn window_bounds(&self, window_id: &WindowId) -> Option<RectF> {
         self.0.borrow().window_bounds(window_id)
     }
