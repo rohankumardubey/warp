@@ -63,6 +63,7 @@ const ASK_USER_QUESTION_ACTIVE: &str = "AskUserQuestionActive";
 
 pub(crate) const ASK_USER_QUESTION_AUTO_ADVANCE_DELAY: Duration = Duration::from_millis(300);
 pub(crate) const ASK_USER_QUESTION_MAX_CONTAINER_HEIGHT: f32 = 320.;
+pub(crate) const ASK_USER_QUESTION_SINGLE_MAX_CONTAINER_HEIGHT: f32 = 520.;
 pub(crate) const ASK_USER_QUESTION_OPTION_BUTTON_VERTICAL_SPACING: f32 = 4.;
 pub(crate) const ASK_USER_QUESTION_TEXT_TOP_PADDING: f32 = 16.;
 pub(crate) const ASK_USER_QUESTION_TEXT_BOTTOM_PADDING: f32 = 8.;
@@ -99,16 +100,22 @@ fn ask_user_question_header_height(appearance: &Appearance, app: &AppContext) ->
 fn ask_user_question_container_height(
     max_option_count: usize,
     appearance: &Appearance,
+    is_single_question: bool,
     has_nav_footer: bool,
     app: &AppContext,
 ) -> f32 {
+    let max_height = if is_single_question {
+        ASK_USER_QUESTION_SINGLE_MAX_CONTAINER_HEIGHT
+    } else {
+        ASK_USER_QUESTION_MAX_CONTAINER_HEIGHT
+    };
     let mut natural_height = ask_user_question_header_height(appearance, app)
         + ask_user_question_text_height(appearance, app)
         + estimated_min_height_for_all_options(max_option_count, appearance.monospace_font_size());
     if has_nav_footer {
         natural_height += standard_message_bar_height(app) + 1.;
     }
-    natural_height.min(ASK_USER_QUESTION_MAX_CONTAINER_HEIGHT)
+    natural_height.min(max_height)
 }
 
 fn ask_user_question_auto_advance_enabled(is_multiselect: bool, is_last_question: bool) -> bool {
@@ -1266,10 +1273,12 @@ impl AskUserQuestionView {
         if current.question.is_multiselect() {
             question_text.push_str(" (select all that apply)");
         }
+        let is_single_question = !self.session.has_multiple_questions();
         let has_nav_footer = self.session.has_multiple_questions();
         let container_height = ask_user_question_container_height(
             self.session.max_option_count(),
             appearance,
+            is_single_question,
             has_nav_footer,
             app,
         );
