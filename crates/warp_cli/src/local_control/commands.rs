@@ -1,7 +1,7 @@
 //! Implementations for user-facing `warpctrl` command groups.
 use local_control::protocol::{
     Action, ActionKind, ActionMetadata, ActionNameParams, ActionParams, ControlError,
-    DriveObjectId, EmptyParams, ErrorCode, RequestEnvelope,
+    DriveObjectId, EmptyParams, ErrorCode, RequestEnvelope, WorkflowRunParams,
 };
 use local_control::selection::select_instance;
 use serde::Serialize;
@@ -11,9 +11,9 @@ use crate::local_control::output::{write_json, write_json_line};
 use crate::local_control::selectors::{instance_selector, target_selector};
 use crate::local_control::{
     ActionCommand, AppCommand, AppearanceCommand, BlockCommand, CapabilityCommand, DriveCommand,
-    FileCommand, HistoryCommand, InputCommand, InstanceCommand, KeybindingCommand, PaneCommand,
-    SessionCommand, SettingCommand, TabColorCommand, TabCommand, TargetArgs, ThemeCommand,
-    WindowCommand,
+    DriveWorkflowCommand, FileCommand, HistoryCommand, InputCommand, InstanceCommand,
+    KeybindingCommand, PaneCommand, SessionCommand, SettingCommand, TabColorCommand, TabCommand,
+    TargetArgs, ThemeCommand, WindowCommand,
 };
 
 /// Display-oriented projection of a discoverable Warp instance.
@@ -271,6 +271,12 @@ pub(super) fn run_input_command(
             local_control::EmptyParams {},
             output_format,
         ),
+        InputCommand::Run(args) => run_action_with_params(
+            args.target,
+            ActionKind::InputRun,
+            ActionParams::Text { text: args.text },
+            output_format,
+        ),
     }
 }
 
@@ -457,6 +463,17 @@ pub(super) fn run_drive_command(
             },
             output_format,
         ),
+        DriveCommand::Workflow(command) => match command {
+            DriveWorkflowCommand::Run(args) => run_action_with_params(
+                args.target,
+                ActionKind::DriveWorkflowRun,
+                ActionParams::WorkflowRun(WorkflowRunParams {
+                    id: DriveObjectId(args.id),
+                    args: args.args,
+                }),
+                output_format,
+            ),
+        },
     }
 }
 

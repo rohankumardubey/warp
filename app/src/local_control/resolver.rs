@@ -1,9 +1,9 @@
 //! Target and parameter validation for the first local-control action slice.
 use crate::local_control::handlers::metadata::action_metadata_for_name;
 use ::local_control::protocol::{
-    ActionNameParams, BindingNameParams, BlockIdParams, BlockListParams, DriveInspectParams,
-    DriveListParams, HistoryListParams, PaneTarget, SessionTarget, SettingGetParams, TabTarget,
-    TargetSelector, WindowTarget,
+    ActionNameParams, ActionParams, BindingNameParams, BlockIdParams, BlockListParams,
+    DriveInspectParams, DriveListParams, HistoryListParams, PaneTarget, SessionTarget,
+    SettingGetParams, TabTarget, TargetSelector, WindowTarget,
 };
 use ::local_control::{ActionKind, ControlError, ErrorCode};
 use warpui::{ModelContext, WindowId};
@@ -118,8 +118,58 @@ pub(crate) fn validate_action_params(action: &::local_control::Action) -> Result
             }
             Ok(())
         }),
+        ActionKind::InputRun => {
+            let ActionParams::Text { text } = action.params_as::<ActionParams>()? else {
+                return Err(ControlError::new(
+                    ErrorCode::InvalidParams,
+                    "input.run requires text parameters",
+                ));
+            };
+            if text.trim().is_empty() {
+                return Err(ControlError::new(
+                    ErrorCode::InvalidParams,
+                    "input.run requires non-empty text",
+                ));
+            }
+            Ok(())
+        }
+        ActionKind::DriveWorkflowRun => {
+            let ActionParams::WorkflowRun(params) = action.params_as::<ActionParams>()? else {
+                return Err(ControlError::new(
+                    ErrorCode::InvalidParams,
+                    "drive.workflow.run requires workflow run parameters",
+                ));
+            };
+            if params.id.0.trim().is_empty() {
+                return Err(ControlError::new(
+                    ErrorCode::InvalidParams,
+                    "drive.workflow.run requires a non-empty workflow id",
+                ));
+            }
+            for arg in &params.args {
+                if excluded_submission_argument_name(&arg.name) {
+                    return Err(ControlError::new(
+                        ErrorCode::UnsupportedAction,
+                        "drive.workflow.run does not accept accepted-command or agent-prompt submissions",
+                    ));
+                }
+            }
+            Ok(())
+        }
         _ => Ok(()),
     }
+}
+
+fn excluded_submission_argument_name(name: &str) -> bool {
+    matches!(
+        name,
+        "accepted_command"
+            | "accepted-command"
+            | "agent_prompt"
+            | "agent-prompt"
+            | "internal_dispatch"
+            | "internal-dispatch"
+    )
 }
 
 fn validate_empty_action_params(action: &::local_control::Action) -> Result<(), ControlError> {

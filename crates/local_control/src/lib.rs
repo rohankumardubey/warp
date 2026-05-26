@@ -25,12 +25,15 @@ pub use discovery::{
     discovery_dir,
 };
 pub use protocol::{
-    Action, ActionNameParams, BindingNameParams, BlockIdParams, BlockInspectResult,
+    Action, ActionNameParams, ActionParams, BindingNameParams, BlockIdParams, BlockInspectResult,
     BlockListParams, BlockListResult, BlockSummary, ControlError, ControlResponse,
-    DriveInspectParams, DriveInspectResult, DriveObjectListParams, DriveObjectSummary,
-    DriveObjectType, EmptyParams, ErrorCode, ErrorResponseEnvelope, ExecutionContextProof,
-    HistoryListParams, HistoryListResult, InputStateResult, KeybindingGetParams, LimitParams,
+    DriveInspectParams, DriveInspectResult, DriveListParams, DriveMutationAudit,
+    DriveMutationResult, DriveObjectCreateParams, DriveObjectId, DriveObjectInsertParams,
+    DriveObjectListParams, DriveObjectSummary, DriveObjectType, DriveObjectUpdateParams,
+    EmptyParams, ErrorCode, ErrorResponseEnvelope, ExecutionContextProof, HistoryListParams,
+    HistoryListResult, InputStateResult, KeybindingGetParams, LimitParams, LocalControlAuditRecord,
     PROTOCOL_VERSION, RequestEnvelope, ResponseEnvelope, SettingGetParams, ThemeStateResult,
+    WorkflowArgument, WorkflowRunParams,
 };
 pub use scripting::{ScriptingGrant, ScriptingIdentitySource, ScriptingScope};
 pub use selectors::{PaneSelector, SessionSelector, TabSelector, TargetSelector, WindowSelector};

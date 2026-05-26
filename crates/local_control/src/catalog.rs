@@ -394,7 +394,7 @@ define_action_catalog! {
         InputReplace => { name: "input.replace", status: Implemented, authenticated_user: false, contexts: Any, state: AppStateMutation, target: Input, params: Text, result: Acknowledgement },
         InputClear => { name: "input.clear", status: Implemented, authenticated_user: false, contexts: Any, state: AppStateMutation, target: Input, params: None, result: Acknowledgement },
         InputModeSet => { name: "input.mode.set", status: Implemented, authenticated_user: false, contexts: Any, state: AppStateMutation, target: Input, params: InputMode, result: Acknowledgement },
-        InputRun => { name: "input.run", status: Stub, authenticated_user: true, contexts: InsideWarpOnly, state: UnderlyingDataMutation, target: Input, params: Text, result: Acknowledgement },
+        InputRun => { name: "input.run", status: Implemented, authenticated_user: true, contexts: InsideWarpOnly, state: UnderlyingDataMutation, target: Input, params: Text, result: Acknowledgement },
     }
 
     history {
@@ -468,6 +468,6 @@ define_action_catalog! {
         DriveObjectDelete => { name: "drive.object.delete", status: Implemented, authenticated_user: true, contexts: InsideWarpOnly, state: UnderlyingDataMutation, target: DriveObject, params: DriveObjectId, result: Acknowledgement },
         DriveObjectInsert => { name: "drive.object.insert", status: Implemented, authenticated_user: true, contexts: InsideWarpOnly, state: UnderlyingDataMutation, target: DriveObject, params: DriveObjectInsert, result: Acknowledgement },
         DriveObjectShareToTeam => { name: "drive.object.share_to_team", status: Implemented, authenticated_user: true, contexts: InsideWarpOnly, state: UnderlyingDataMutation, target: DriveObject, params: DriveObjectId, result: Acknowledgement },
-        DriveWorkflowRun => { name: "drive.workflow.run", status: Stub, authenticated_user: true, contexts: InsideWarpOnly, state: UnderlyingDataMutation, target: DriveObject, params: WorkflowRun, result: Acknowledgement },
+        DriveWorkflowRun => { name: "drive.workflow.run", status: Implemented, authenticated_user: true, contexts: InsideWarpOnly, state: UnderlyingDataMutation, target: DriveObject, params: WorkflowRun, result: Acknowledgement },
     }
 }

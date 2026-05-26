@@ -269,6 +269,14 @@ pub enum ControlResult {
     Metadata { data: serde_json::Value },
     Content { data: serde_json::Value },
 }
+/// Structured audit payload for local-control execution attempts.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct LocalControlAuditRecord {
+    pub action: String,
+    pub target_scope: TargetScope,
+    pub permission_category: PermissionCategory,
+    pub authenticated_user_subject: String,
+}
 
 /// Top-level request sent by a local-control client to a Warp instance.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
