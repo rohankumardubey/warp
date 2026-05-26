@@ -9,7 +9,7 @@ use ::local_control::{
 };
 use warpui::{Entity, ModelContext, SingletonEntity};
 
-use crate::local_control::handlers::{layout, metadata};
+use crate::local_control::handlers::{app_state, layout, metadata};
 use crate::local_control::permissions::{ensure_action_allowed, ensure_feature_enabled};
 use crate::local_control::resolver::validate_action_params;
 
@@ -101,6 +101,66 @@ impl LocalControlBridge {
                     return ResponseEnvelope::error(request.request_id, error);
                 }
                 match layout::create_terminal_tab(&self.instance_id, &request.target, ctx) {
+                    Ok(data) => ResponseEnvelope::ok(request.request_id, data),
+                    Err(error) => ResponseEnvelope::error(request.request_id, error),
+                }
+            }
+            ActionKind::AppFocus
+            | ActionKind::WindowCreate
+            | ActionKind::WindowFocus
+            | ActionKind::WindowClose
+            | ActionKind::TabActivate
+            | ActionKind::TabMove
+            | ActionKind::TabClose
+            | ActionKind::TabRename
+            | ActionKind::TabResetName
+            | ActionKind::TabColorClear
+            | ActionKind::PaneSplit
+            | ActionKind::PaneFocus
+            | ActionKind::PaneNavigate
+            | ActionKind::PaneResize
+            | ActionKind::PaneMaximize
+            | ActionKind::PaneUnmaximize
+            | ActionKind::PaneClose
+            | ActionKind::PaneRename
+            | ActionKind::PaneResetName
+            | ActionKind::SessionActivate
+            | ActionKind::SessionPrevious
+            | ActionKind::SessionNext
+            | ActionKind::SessionReopenClosed
+            | ActionKind::InputInsert
+            | ActionKind::InputReplace
+            | ActionKind::InputClear
+            | ActionKind::InputModeSet
+            | ActionKind::SurfaceSettingsOpen
+            | ActionKind::SurfaceCommandPaletteOpen
+            | ActionKind::SurfaceCommandSearchOpen
+            | ActionKind::SurfaceWarpDriveOpen
+            | ActionKind::SurfaceWarpDriveToggle
+            | ActionKind::SurfaceResourceCenterToggle
+            | ActionKind::SurfaceAiAssistantToggle
+            | ActionKind::SurfaceCodeReviewToggle
+            | ActionKind::SurfaceLeftPanelToggle
+            | ActionKind::SurfaceRightPanelToggle
+            | ActionKind::SurfaceVerticalTabsToggle
+            | ActionKind::FileOpen
+            | ActionKind::ProjectOpen
+            | ActionKind::DriveOpen
+            | ActionKind::DriveNotebookOpen
+            | ActionKind::DriveEnvVarCollectionOpen
+            | ActionKind::DriveObjectShareOpen => {
+                if let Err(error) =
+                    ensure_action_allowed(grant.invocation_context, request.action.kind, ctx)
+                {
+                    return ResponseEnvelope::error(request.request_id, error);
+                }
+                match app_state::handle(
+                    &self.instance_id,
+                    request.action.kind,
+                    &request.action.params,
+                    &request.target,
+                    ctx,
+                ) {
                     Ok(data) => ResponseEnvelope::ok(request.request_id, data),
                     Err(error) => ResponseEnvelope::error(request.request_id, error),
                 }

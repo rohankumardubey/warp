@@ -541,32 +541,20 @@ impl ActionKind {
 
     fn implementation_status(self) -> ActionImplementationStatus {
         match self {
-            Self::InstanceList | Self::AppPing | Self::AppVersion | Self::TabCreate => {
-                ActionImplementationStatus::Implemented
-            }
-            Self::InstanceInspect
-            | Self::AppActive
+            Self::InstanceList
+            | Self::AppPing
+            | Self::AppVersion
             | Self::AppFocus
-            | Self::AuthStatus
-            | Self::AuthLogin
-            | Self::CapabilityList
-            | Self::CapabilityInspect
-            | Self::WindowList
-            | Self::WindowInspect
             | Self::WindowCreate
             | Self::WindowFocus
             | Self::WindowClose
-            | Self::TabList
-            | Self::TabInspect
+            | Self::TabCreate
             | Self::TabActivate
             | Self::TabMove
             | Self::TabClose
             | Self::TabRename
             | Self::TabResetName
-            | Self::TabColorSet
             | Self::TabColorClear
-            | Self::PaneList
-            | Self::PaneInspect
             | Self::PaneSplit
             | Self::PaneFocus
             | Self::PaneNavigate
@@ -576,20 +564,50 @@ impl ActionKind {
             | Self::PaneClose
             | Self::PaneRename
             | Self::PaneResetName
-            | Self::SessionList
-            | Self::SessionInspect
             | Self::SessionActivate
             | Self::SessionPrevious
             | Self::SessionNext
             | Self::SessionReopenClosed
-            | Self::BlockList
-            | Self::BlockInspect
-            | Self::BlockOutput
-            | Self::InputGet
             | Self::InputInsert
             | Self::InputReplace
             | Self::InputClear
             | Self::InputModeSet
+            | Self::SurfaceSettingsOpen
+            | Self::SurfaceCommandPaletteOpen
+            | Self::SurfaceCommandSearchOpen
+            | Self::SurfaceWarpDriveOpen
+            | Self::SurfaceWarpDriveToggle
+            | Self::SurfaceResourceCenterToggle
+            | Self::SurfaceAiAssistantToggle
+            | Self::SurfaceCodeReviewToggle
+            | Self::SurfaceLeftPanelToggle
+            | Self::SurfaceRightPanelToggle
+            | Self::SurfaceVerticalTabsToggle
+            | Self::FileOpen
+            | Self::ProjectOpen
+            | Self::DriveOpen
+            | Self::DriveNotebookOpen
+            | Self::DriveEnvVarCollectionOpen
+            | Self::DriveObjectShareOpen => ActionImplementationStatus::Implemented,
+            Self::InstanceInspect
+            | Self::AppActive
+            | Self::AuthStatus
+            | Self::AuthLogin
+            | Self::CapabilityList
+            | Self::CapabilityInspect
+            | Self::WindowList
+            | Self::WindowInspect
+            | Self::TabList
+            | Self::TabInspect
+            | Self::TabColorSet
+            | Self::PaneList
+            | Self::PaneInspect
+            | Self::SessionList
+            | Self::SessionInspect
+            | Self::BlockList
+            | Self::BlockInspect
+            | Self::BlockOutput
+            | Self::InputGet
             | Self::InputRun
             | Self::HistoryList
             | Self::ThemeList
@@ -613,28 +631,11 @@ impl ActionKind {
             | Self::KeybindingGet
             | Self::ActionList
             | Self::ActionInspect
-            | Self::SurfaceSettingsOpen
-            | Self::SurfaceCommandPaletteOpen
-            | Self::SurfaceCommandSearchOpen
-            | Self::SurfaceWarpDriveOpen
-            | Self::SurfaceWarpDriveToggle
-            | Self::SurfaceResourceCenterToggle
-            | Self::SurfaceAiAssistantToggle
-            | Self::SurfaceCodeReviewToggle
-            | Self::SurfaceLeftPanelToggle
-            | Self::SurfaceRightPanelToggle
-            | Self::SurfaceVerticalTabsToggle
             | Self::FileList
-            | Self::FileOpen
             | Self::ProjectActive
             | Self::ProjectList
-            | Self::ProjectOpen
             | Self::DriveList
             | Self::DriveInspect
-            | Self::DriveOpen
-            | Self::DriveNotebookOpen
-            | Self::DriveEnvVarCollectionOpen
-            | Self::DriveObjectShareOpen
             | Self::DriveObjectCreate
             | Self::DriveObjectUpdate
             | Self::DriveObjectDelete

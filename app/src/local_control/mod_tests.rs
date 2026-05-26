@@ -115,16 +115,34 @@ fn tab_create_rejects_unsupported_selector_forms() {
 }
 
 #[test]
-fn capabilities_advertises_only_first_slice_core_actions() {
-    assert_eq!(
-        capabilities(),
-        vec![
-            ActionKind::InstanceList,
-            ActionKind::AppPing,
-            ActionKind::AppVersion,
-            ActionKind::TabCreate,
-        ]
-    );
+fn capabilities_advertises_implemented_app_state_actions() {
+    let actions = capabilities();
+    for action in [
+        ActionKind::InstanceList,
+        ActionKind::AppPing,
+        ActionKind::AppVersion,
+        ActionKind::TabCreate,
+        ActionKind::PaneSplit,
+        ActionKind::InputInsert,
+        ActionKind::InputReplace,
+        ActionKind::InputClear,
+        ActionKind::InputModeSet,
+        ActionKind::FileOpen,
+        ActionKind::SurfaceLeftPanelToggle,
+        ActionKind::SurfaceRightPanelToggle,
+        ActionKind::DriveObjectShareOpen,
+    ] {
+        assert!(actions.contains(&action));
+    }
+    for action in [
+        ActionKind::InputRun,
+        ActionKind::DriveWorkflowRun,
+        ActionKind::DriveObjectCreate,
+        ActionKind::DriveObjectUpdate,
+        ActionKind::DriveObjectDelete,
+    ] {
+        assert!(!actions.contains(&action));
+    }
 }
 
 #[test]
