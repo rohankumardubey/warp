@@ -502,7 +502,10 @@ impl WorkingDirectoriesModel {
                 .unwrap_or(path)
         };
 
-        let root_for_raw_path = |raw_path: &str| normalize_cwd(raw_path).map(root_for_path);
+        // Convert a CanonicalizedPath (already canonical) to its repo root.
+        // No filesystem I/O — the path was canonicalized once at the shell boundary.
+        let root_for_canonical =
+            |cp: &CanonicalizedPath| -> PathBuf { root_for_path(cp.as_path_buf().clone()) };
 
         // Split terminal CWDs into local and remote buckets.
         let mut local_terminal_cwds: Vec<(EntityId, String)> = Vec::new();
@@ -521,7 +524,7 @@ impl WorkingDirectoriesModel {
         // Collapse working directories to their nearest repository root (when detected).
         let mut file_path_ancestors: HashSet<PathBuf> = local_terminal_cwds
             .iter()
-            .filter_map(|(_, cwd)| root_for_raw_path(cwd))
+            .map(|(_, cwd)| root_for_canonical(cwd))
             .collect();
 
         // Split editor paths into local and remote buckets.
@@ -541,13 +544,12 @@ impl WorkingDirectoriesModel {
         let local_cwds: Vec<(EntityId, String)> = local_editor_paths
             .into_iter()
             .filter_map(|(view_id, path)| {
-                let path_buf = PathBuf::from(&path);
                 let resolved_path = self
-                    .get_repo_root_for_path(&path_buf, ctx)
-                    .or_else(|| path_buf.parent().map(|p| p.to_path_buf()))?;
+                    .get_repo_root_for_path(&path, ctx)
+                    .or_else(|| path.parent().map(|p| p.to_path_buf()))?;
 
                 if file_path_ancestors.insert(resolved_path.clone()) {
-                    Some((view_id, resolved_path.display().to_string()))
+                    Some((view_id, resolved_path))
                 } else {
                     None
                 }
@@ -557,8 +559,12 @@ impl WorkingDirectoriesModel {
         // Build the local root paths for pane_groups.
         let new_local_root_paths: Vec<PathBuf> = local_terminal_cwds
             .iter()
-            .chain(local_cwds.iter())
-            .filter_map(|(_, cwd)| root_for_raw_path(cwd))
+            .map(|(_, cwd)| root_for_canonical(cwd))
+            .chain(
+                local_cwds
+                    .iter()
+                    .map(|(_, path)| root_for_path(path.clone())),
+            )
             .collect();
 
         // Build remote root paths for pane_groups from remote terminal CWDs
@@ -992,24 +998,6 @@ impl Entity for WorkingDirectoriesModel {
     type Event = WorkingDirectoriesEvent;
 }
 
-/// Normalize a CWD path string to a canonical PathBuf
-///
-/// This function attempts to canonicalize (resolve symlinks, make absolute)
-///
-/// Returns None if the path is empty, invalid, or cannot be canonicalized.
-/// Canonicalization failure may indicate remote paths or non-existent directories,
-/// which could be supported in the future.
-#[cfg(feature = "local_fs")]
-fn normalize_cwd(raw_cwd: &str) -> Option<PathBuf> {
-    if raw_cwd.is_empty() {
-        return None;
-    }
-
-    let path = PathBuf::from(raw_cwd.to_string());
-    // Use dunce::canonicalize to avoid Windows extended-length path prefix (\\?\)
-    // which would cause path comparison mismatches with CanonicalizedPath.
-    dunce::canonicalize(&path).ok()
-}
 
 #[cfg(test)]
 #[path = "working_directories_tests.rs"]

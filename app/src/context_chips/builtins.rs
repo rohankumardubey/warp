@@ -13,7 +13,7 @@ mod tests;
 
 /// Generator function for the current working directory.
 pub fn working_directory(ctx: &GeneratorContext) -> Option<ChipValue> {
-    let pwd = ctx.active_block_metadata.current_working_directory()?;
+    let pwd = ctx.active_block_metadata.display_working_directory()?;
     let home_dir = ctx.active_session.and_then(|session| session.home_dir());
     Some(ChipValue::Text(
         user_friendly_path(pwd, home_dir).to_string(),

@@ -2560,6 +2560,10 @@ pub struct TerminalView {
 
     sessions: ModelHandle<Sessions>,
     active_block_metadata: Option<BlockMetadata>,
+    /// Canonical (IO-validated) working directory, cached once when the shell reports a new CWD
+    /// via [`ModelEvent::BlockMetadataReceived`]. `None` for remote sessions or when the directory
+    /// no longer exists on disk.
+    canonical_pwd: Option<repo_metadata::CanonicalizedPath>,
 
     block_text_selection_start_position: Option<Vector2F>,
 
@@ -4210,6 +4214,7 @@ impl TerminalView {
             sessions,
             remote_server_shimmer_handle: ShimmeringTextStateHandle::new(),
             active_block_metadata: None,
+            canonical_pwd: None,
             block_text_selection_start_position: None,
             background_executor: ctx.background_executor().clone(),
             inline_banners_state: Default::default(),
@@ -7175,7 +7180,7 @@ impl TerminalView {
         if self.active_session_is_local(ctx) == Some(true) {
             self.active_block_metadata
                 .as_ref()
-                .and_then(BlockMetadata::current_working_directory)
+                .and_then(BlockMetadata::display_working_directory)
                 .and_then(|cwd| {
                     self.active_block_session_id()
                         .and_then(|active_session_id| {
@@ -13063,7 +13068,7 @@ impl TerminalView {
         self.any_session_contains_remote_blocks |= self.active_block_is_considered_remote(ctx);
         self.update_focused_terminal_info(ctx);
 
-        if let Some(working_directory) = self.pwd_if_local(ctx) {
+        if let Some(working_directory) = self.display_pwd_if_local(ctx) {
             CodebaseIndexManager::handle(ctx).update(ctx, |manager, _ctx| {
                 let path_buf = PathBuf::from(&working_directory);
                 manager.handle_session_bootstrapped(&path_buf);
@@ -13508,7 +13513,7 @@ impl TerminalView {
 
     // Show or hide codebase index speedbump depending when a settings change happens.
     fn check_codebase_index_speedbump_on_settings_changed(&mut self, ctx: &mut ViewContext<Self>) {
-        if let Some(working_directory) = self.pwd_if_local(ctx) {
+        if let Some(working_directory) = self.display_pwd_if_local(ctx) {
             let path_buf = PathBuf::from(&working_directory);
             self.update_repo_banner_state(path_buf, ctx);
         }
@@ -22410,13 +22415,21 @@ impl TerminalView {
     pub fn pwd(&self) -> Option<String> {
         self.active_block_metadata
             .as_ref()
-            .and_then(BlockMetadata::current_working_directory)
+            .and_then(BlockMetadata::display_working_directory)
             .map(|pwd| pwd.to_string())
     }
 
-    pub fn pwd_if_local(&self, ctx: &AppContext) -> Option<String> {
+    /// Returns the raw (non-canonicalized) CWD as a display string.
+    /// Use [`Self::canonical_pwd_if_local`] when the path will be used for filesystem operations.
+    pub fn display_pwd_if_local(&self, ctx: &AppContext) -> Option<String> {
         self.active_session_path_if_local(ctx)
-            .map(|path| path.to_string_lossy().into_owned())
+            .map(|path| path.display().to_string())
+    }
+
+    /// Returns the cached canonical CWD without any filesystem I/O.
+    /// Populated once per [`ModelEvent::BlockMetadataReceived`] event for local sessions.
+    pub fn canonical_pwd_if_local(&self) -> Option<&repo_metadata::CanonicalizedPath> {
+        self.canonical_pwd.as_ref()
     }
 
     /// Returns the active session's CWD as a `LocalOrRemotePath`.
@@ -25191,7 +25204,7 @@ impl TerminalView {
         use crate::ai::persisted_workspace::LspTask;
 
         let Some(cwd) = self
-            .pwd_if_local(ctx)
+            .display_pwd_if_local(ctx)
             .map(PathBuf::from)
             .and_then(|p| p.canonicalize().ok())
         else {

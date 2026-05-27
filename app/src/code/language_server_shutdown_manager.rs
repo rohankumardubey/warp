@@ -107,7 +107,7 @@ fn has_terminal_for_workspace(root: &Path, app: &AppContext) -> bool {
     for window_id in app.window_ids() {
         if let Some(terminals) = app.views_of_type::<TerminalView>(window_id) {
             for terminal in terminals {
-                let Some(pwd) = terminal.as_ref(app).pwd_if_local(app) else {
+                let Some(pwd) = terminal.as_ref(app).display_pwd_if_local(app) else {
                     continue;
                 };
 

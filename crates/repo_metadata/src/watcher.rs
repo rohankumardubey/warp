@@ -96,8 +96,11 @@ impl DirectoryWatcher {
     }
 
     /// Given a path, return the watched directory that contains it.
+    ///
+    /// The caller should provide an already-canonical path (e.g. from
+    /// `CanonicalizedPath`) so this lookup avoids filesystem I/O.
     pub fn get_watched_directory_for_path(&self, path: &Path) -> Option<ModelHandle<Repository>> {
-        let standardized = StandardizedPath::from_local_canonicalized(path).ok()?;
+        let standardized = StandardizedPath::try_from_local(path).ok()?;
         self.find_containing_directory(&standardized)
     }
 

@@ -4528,10 +4528,10 @@ fn compute_tab_group_color_mode(
         .iter()
         .map(|&pane_id| {
             let color = if let Some(tv) = pane_group.terminal_view_from_pane_id(pane_id, app) {
-                // Terminal pane: determine color from CWD.
-                tv.as_ref(app).pwd_if_local(app).and_then(|cwd| {
+                // Terminal pane: determine color from canonical CWD (no I/O).
+                tv.as_ref(app).canonical_pwd_if_local().and_then(|cwd| {
                     dir_colors
-                        .color_for_directory(Path::new(&cwd))
+                        .color_for_directory(cwd.as_path())
                         .and_then(|c| c.ansi_color())
                 })
             } else if let Some(code_view) = pane_group.code_view_from_pane_id(pane_id, app) {

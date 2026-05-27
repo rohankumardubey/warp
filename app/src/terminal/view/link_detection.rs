@@ -438,7 +438,7 @@ impl super::TerminalView {
         // For AltScreen we scan for relative path with the current working directory.
         // For BlockList we scan for relative path with the pwd of the hovered block.
         let pwd_to_scan_for = match position {
-            WithinModel::AltScreen(_) => self.pwd_if_local(ctx),
+            WithinModel::AltScreen(_) => self.display_pwd_if_local(ctx),
             WithinModel::BlockList(inner) => self
                 .model
                 .lock()

@@ -708,7 +708,7 @@ impl BlocklistAIStatusBar {
                 .terminal_model
                 .lock()
                 .active_block_metadata()
-                .current_working_directory()
+                .display_working_directory()
                 .map(|cwd| cwd.to_string());
 
             // Update the tip using the model's cooldown-based API

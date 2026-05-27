@@ -1032,7 +1032,7 @@ impl<'a> TabComponent<'a> {
                     .block_list()
                     .active_block()
                     .metadata()
-                    .current_working_directory()
+                    .display_working_directory()
                     .map(|s| s.to_string())
             })
     }

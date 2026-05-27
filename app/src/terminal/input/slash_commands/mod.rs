@@ -606,7 +606,7 @@ impl Input {
                         let current_dir = self
                             .active_block_metadata
                             .as_ref()
-                            .and_then(|metadata| metadata.current_working_directory())
+                            .and_then(|metadata| metadata.display_working_directory())
                             .map(str::to_owned);
 
                         let Some(current_dir) = current_dir else {

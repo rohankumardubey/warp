@@ -58,7 +58,7 @@ impl TerminalView {
 
             let command = block_completed.command.clone();
             let working_directory = active_block_metadata
-                .current_working_directory()
+                .display_working_directory()
                 .map(Into::into);
             let command_case_sensitivity = session.command_case_sensitivity();
             let escape_char = session.shell_family().escape_char();

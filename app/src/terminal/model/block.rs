@@ -651,7 +651,7 @@ impl BlockMetadata {
         self.session_id
     }
 
-    pub fn current_working_directory(&self) -> Option<&str> {
+    pub fn display_working_directory(&self) -> Option<&str> {
         self.current_working_directory.as_deref()
     }
 }

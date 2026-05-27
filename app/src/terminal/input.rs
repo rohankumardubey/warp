@@ -1329,11 +1329,11 @@ impl CompleterData {
         let pwd = self
             .active_block_metadata
             .as_ref()
-            .and_then(BlockMetadata::current_working_directory)
+            .and_then(BlockMetadata::display_working_directory)
             .map(str::to_owned);
 
         current_session.zip(pwd).map(|(current_session, pwd)| {
-            // TODO(abhishek): Ideally, BlockMetadata::current_working_directory should directly
+            // TODO(abhishek): Ideally, BlockMetadata::display_working_directory should directly
             // return a TypedPathBuf. This shouldn't happen here in the view.
             let current_working_directory =
                 current_session.convert_directory_to_typed_path_buf(pwd);
@@ -5311,7 +5311,7 @@ impl Input {
         let current_dir = self
             .active_block_metadata
             .as_ref()
-            .and_then(|metadata| metadata.current_working_directory())
+            .and_then(|metadata| metadata.display_working_directory())
             .map(PathBuf::from)
             .or_else(|| {
                 log::debug!(
@@ -5691,7 +5691,7 @@ impl Input {
             let current_dir = self
                 .active_block_metadata
                 .as_ref()
-                .and_then(|metadata| metadata.current_working_directory())
+                .and_then(|metadata| metadata.display_working_directory())
                 .map(std::path::PathBuf::from)
                 .ok_or("Failed to get current working directory".to_string())?;
             let file_path = current_dir.join(_file_name);
@@ -10450,7 +10450,7 @@ impl Input {
                                 let processed_path = self
                                     .active_block_metadata
                                     .as_ref()
-                                    .and_then(BlockMetadata::current_working_directory)
+                                    .and_then(BlockMetadata::display_working_directory)
                                     .and_then(|pwd| {
                                         // Find git repo and construct absolute path
                                         use repo_metadata::repositories::DetectedRepositories;
@@ -12070,11 +12070,11 @@ impl Input {
                 let pwd = self
                     .active_block_metadata
                     .as_ref()
-                    .and_then(BlockMetadata::current_working_directory)
+                    .and_then(BlockMetadata::display_working_directory)
                     .map(str::to_owned);
 
                 current_session.zip(pwd).map(|(current_session, pwd)| {
-                    // TODO(abhishek): Ideally, BlockMetadata::current_working_directory should directly
+                    // TODO(abhishek): Ideally, BlockMetadata::display_working_directory should directly
                     // return a TypedPathBuf. This shouldn't happen here in the view.
                     let current_working_directory =
                         current_session.convert_directory_to_typed_path_buf(pwd);
@@ -14458,7 +14458,7 @@ impl Input {
             if current_session.is_local() {
                 self.active_block_metadata
                     .as_ref()
-                    .and_then(BlockMetadata::current_working_directory)
+                    .and_then(BlockMetadata::display_working_directory)
                     .map(Path::new)
             } else {
                 None

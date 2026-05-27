@@ -418,7 +418,7 @@ impl CurrentPrompt {
                 ChipFingerprintInput::WorkingDirectory => {
                     context
                         .active_block_metadata
-                        .current_working_directory()
+                        .display_working_directory()
                         .hash(&mut hasher);
                 }
                 ChipFingerprintInput::GitBranch => {
@@ -554,7 +554,7 @@ impl CurrentPrompt {
 
         let current_dir_path = latest_context
             .active_block_metadata
-            .current_working_directory()
+            .display_working_directory()
             .map(ToOwned::to_owned);
 
         let path_env_var = session.path().as_deref().map(str::to_owned);

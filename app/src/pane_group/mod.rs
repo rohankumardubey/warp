@@ -8092,6 +8092,7 @@ impl PaneGroup {
 
     /// Get all terminal CWDs for this pane group.
     /// This is used by the Workspace to refresh the active directories model.
+    /// Returns cached canonical paths (no filesystem I/O).
     pub fn terminal_view_working_directories<'a>(
         &'a self,
         ctx: &'a AppContext,

@@ -3347,7 +3347,7 @@ impl ansi::Handler for TerminalModel {
                     #[cfg(not(target_family = "wasm"))]
                     if let Some(cwd) = self
                         .active_block_metadata()
-                        .current_working_directory()
+                        .display_working_directory()
                         .map(|cwd| cwd.to_string())
                     {
                         let mut path = PathBuf::from(cwd);

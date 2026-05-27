@@ -321,7 +321,7 @@ impl NextCommandModel {
         let working_dir = completer_data
             .active_block_metadata
             .as_ref()
-            .and_then(|block_metadata| block_metadata.current_working_directory());
+            .and_then(|block_metadata| block_metadata.display_working_directory());
         Some(find_potential_autosuggestions_from_history(
             history_entries.into_iter(),
             prefix,

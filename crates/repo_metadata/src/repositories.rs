@@ -220,10 +220,13 @@ impl DetectedRepositories {
     /// Given a local or remote path, return its corresponding repo root.
     /// This does not run the check against the actual file system.
     /// Instead it checks against our cached path to root mapping.
+    ///
+    /// For local paths, the caller should provide an already-canonical path
+    /// (e.g. from `CanonicalizedPath`) to avoid a filesystem round-trip.
     pub fn get_root_for_path(&self, path: &LocalOrRemotePath) -> Option<LocalOrRemotePath> {
         match path {
             LocalOrRemotePath::Local(local_path) => {
-                let std_path = StandardizedPath::from_local_canonicalized(local_path).ok()?;
+                let std_path = StandardizedPath::try_from_local(local_path).ok()?;
                 self.find_local_repository_root(&std_path)
             }
             LocalOrRemotePath::Remote(remote_path) => self.find_remote_repository_root(remote_path),
