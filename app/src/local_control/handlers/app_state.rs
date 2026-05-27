@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use ::local_control::protocol::{
     ActionParams, Direction as ControlDirection, DriveObjectId, FileOpenParams, InputMode,
-    TabActivationMode, TabCloseMode, TargetSelector,
+    PaneTarget, TabActivationMode, TabCloseMode, TabTarget, TargetSelector,
 };
 use ::local_control::{ActionKind, ControlError, ErrorCode, InstanceId};
 use serde_json::json;
@@ -13,6 +13,7 @@ use warpui::{ModelContext, SingletonEntity, TypedActionView, ViewHandle};
 use crate::cloud_object::model::persistence::CloudModel;
 use crate::cloud_object::CloudObject as _;
 use crate::drive::items::WarpDriveItemId;
+use crate::local_control::resolver::target_window_id_for_target;
 use crate::local_control::LocalControlBridge;
 use crate::palette::PaletteMode;
 use crate::pane_group::{Direction, PaneGroup, PaneGroupAction};
@@ -30,7 +31,9 @@ pub(crate) fn handle(
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<serde_json::Value, ControlError> {
     match action {
-        ActionKind::AppFocus | ActionKind::WindowFocus => focus_window(instance_id, action, ctx),
+        ActionKind::AppFocus | ActionKind::WindowFocus => {
+            focus_window(instance_id, action, target, ctx)
+        }
         ActionKind::WindowCreate => {
             workspace_action(instance_id, action, WorkspaceAction::AddWindow, ctx)
         }
@@ -139,13 +142,10 @@ pub(crate) fn handle(
 fn focus_window(
     instance_id: &Option<InstanceId>,
     action: ActionKind,
+    target: &TargetSelector,
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<serde_json::Value, ControlError> {
-    let window_id = crate::local_control::resolver::target_window_id_for_target(
-        ctx,
-        &TargetSelector::default(),
-        action,
-    )?;
+    let window_id = target_window_id_for_target(ctx, target, action)?;
     ctx.windows().show_window_and_focus_app(window_id);
     Ok(ack(instance_id, action))
 }
@@ -188,18 +188,19 @@ fn tab_activate(
         ActionParams::None => TabActivationMode::Target,
         _ => return invalid_params(ActionKind::TabActivate),
     };
-    let workspace = active_workspace(ActionKind::TabActivate, ctx)?;
+    let workspace = target_workspace(ActionKind::TabActivate, target, ctx)?;
     workspace.update(ctx, |workspace, ctx| {
         let action = match mode {
-            TabActivationMode::Target => tab_index_from_target(target, workspace)
-                .map(WorkspaceAction::ActivateTab)
-                .unwrap_or(WorkspaceAction::ActivateTab(workspace.active_tab_index())),
+            TabActivationMode::Target => {
+                WorkspaceAction::ActivateTab(tab_index_from_target(target, workspace)?)
+            }
             TabActivationMode::Previous => WorkspaceAction::ActivatePrevTab,
             TabActivationMode::Next => WorkspaceAction::ActivateNextTab,
             TabActivationMode::Last => WorkspaceAction::ActivateLastTab,
         };
         workspace.handle_action(&action, ctx);
-    });
+        Ok::<_, ControlError>(())
+    })?;
     Ok(ack(instance_id, ActionKind::TabActivate))
 }
 
@@ -288,38 +289,50 @@ fn pane_focus(
             "pane focus requires a pane target",
         )
     })?;
-    let workspace = active_workspace(action_kind, ctx)?;
-    let action = workspace.read(ctx, |workspace, ctx| {
-        let pane_group = workspace.active_tab_pane_group().as_ref(ctx);
-        match pane_target {
-            ::local_control::protocol::PaneTarget::Active => Ok(None),
-            ::local_control::protocol::PaneTarget::Index { index } => {
-                let pane_index = usize::try_from(*index).map_err(|err| {
-                    ControlError::with_details(
-                        ErrorCode::InvalidSelector,
-                        "pane index is out of range",
-                        err.to_string(),
-                    )
-                })?;
-                let pane_id = pane_group.pane_id_from_index(pane_index).ok_or_else(|| {
-                    ControlError::new(
-                        ErrorCode::MissingTarget,
-                        "pane index did not match a visible pane",
-                    )
-                })?;
-                Ok(Some(PaneGroupAction::Activate(
-                    pane_id,
-                    crate::pane_group::ActivationReason::Click,
-                )))
-            }
-            ::local_control::protocol::PaneTarget::Id { .. } => Err(ControlError::new(
-                ErrorCode::StaleTarget,
-                "pane id selectors are not resolvable by this shard",
-            )),
+    let pane_group = target_pane_group(action_kind, target, ctx)?;
+    let action = pane_group.read(ctx, |pane_group, _| match pane_target {
+        PaneTarget::Active => Ok(None),
+        PaneTarget::Index { index } => {
+            let pane_index = usize::try_from(*index).map_err(|err| {
+                ControlError::with_details(
+                    ErrorCode::InvalidSelector,
+                    "pane index is out of range",
+                    err.to_string(),
+                )
+            })?;
+            let pane_id = pane_group.pane_id_from_index(pane_index).ok_or_else(|| {
+                ControlError::new(
+                    ErrorCode::MissingTarget,
+                    "pane index did not match a visible pane",
+                )
+            })?;
+            Ok(Some(PaneGroupAction::Activate(
+                pane_id,
+                crate::pane_group::ActivationReason::Click,
+            )))
         }
+        PaneTarget::Id { id } => pane_group
+            .visible_pane_ids()
+            .into_iter()
+            .find(|pane_id| pane_id.to_string() == id.0)
+            .map(|pane_id| {
+                PaneGroupAction::Activate(pane_id, crate::pane_group::ActivationReason::Click)
+            })
+            .map(Some)
+            .ok_or_else(|| {
+                ControlError::new(
+                    ErrorCode::StaleTarget,
+                    format!(
+                        "{} cannot resolve the requested pane id",
+                        action_kind.as_str()
+                    ),
+                )
+            }),
     })?;
     if let Some(action) = action {
-        pane_group_action(instance_id, action_kind, action, ctx)?;
+        pane_group.update(ctx, |pane_group, ctx| {
+            pane_group.handle_action(&action, ctx);
+        });
     }
     Ok(ack(instance_id, action_kind))
 }
@@ -643,11 +656,15 @@ fn active_workspace(
     action: ActionKind,
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<ViewHandle<Workspace>, ControlError> {
-    let window_id = crate::local_control::resolver::target_window_id_for_target(
-        ctx,
-        &TargetSelector::default(),
-        action,
-    )?;
+    target_workspace(action, &TargetSelector::default(), ctx)
+}
+
+fn target_workspace(
+    action: ActionKind,
+    target: &TargetSelector,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<ViewHandle<Workspace>, ControlError> {
+    let window_id = target_window_id_for_target(ctx, target, action)?;
     ctx.views_of_type::<Workspace>(window_id)
         .and_then(|workspaces| workspaces.into_iter().next())
         .ok_or_else(|| {
@@ -665,10 +682,28 @@ fn active_pane_group(
     action: ActionKind,
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<ViewHandle<PaneGroup>, ControlError> {
-    let workspace = active_workspace(action, ctx)?;
-    Ok(workspace.read(ctx, |workspace, _| {
-        workspace.active_tab_pane_group().clone()
-    }))
+    target_pane_group(action, &TargetSelector::default(), ctx)
+}
+
+fn target_pane_group(
+    action: ActionKind,
+    target: &TargetSelector,
+    ctx: &mut ModelContext<LocalControlBridge>,
+) -> Result<ViewHandle<PaneGroup>, ControlError> {
+    let workspace = target_workspace(action, target, ctx)?;
+    workspace.read(ctx, |workspace, _| {
+        let tab_index = tab_index_from_target(target, workspace)?;
+        workspace
+            .tab_views()
+            .nth(tab_index)
+            .cloned()
+            .ok_or_else(|| {
+                ControlError::new(
+                    ErrorCode::StaleTarget,
+                    format!("{} cannot resolve the requested tab", action.as_str()),
+                )
+            })
+    })
 }
 
 fn action_params(params: &serde_json::Value) -> Result<ActionParams, ControlError> {
@@ -748,16 +783,35 @@ fn pane_direction(direction: ControlDirection) -> Result<Direction, ControlError
     }
 }
 
-fn tab_index_from_target(target: &TargetSelector, workspace: &Workspace) -> Option<usize> {
+fn tab_index_from_target(
+    target: &TargetSelector,
+    workspace: &Workspace,
+) -> Result<usize, ControlError> {
     match target.tab.as_ref() {
-        Some(::local_control::protocol::TabTarget::Index { index }) => usize::try_from(*index)
+        Some(TabTarget::Index { index }) => usize::try_from(*index)
             .ok()
-            .filter(|index| *index < workspace.tab_count()),
-        Some(::local_control::protocol::TabTarget::Active) | None => {
-            Some(workspace.active_tab_index())
-        }
-        Some(::local_control::protocol::TabTarget::Id { .. })
-        | Some(::local_control::protocol::TabTarget::Title { .. }) => None,
+            .filter(|index| *index < workspace.tab_count())
+            .ok_or_else(|| {
+                ControlError::new(
+                    ErrorCode::StaleTarget,
+                    "tab selector index did not match a visible tab",
+                )
+            }),
+        Some(TabTarget::Active) | None => Ok(workspace.active_tab_index()),
+        Some(TabTarget::Id { id }) => workspace
+            .tab_views()
+            .enumerate()
+            .find_map(|(index, pane_group)| (pane_group.id().to_string() == id.0).then_some(index))
+            .ok_or_else(|| {
+                ControlError::new(
+                    ErrorCode::StaleTarget,
+                    "tab selector id did not match a visible tab",
+                )
+            }),
+        Some(TabTarget::Title { .. }) => Err(ControlError::new(
+            ErrorCode::InvalidSelector,
+            "app-state tab mutations do not support tab title selectors",
+        )),
     }
 }
 
