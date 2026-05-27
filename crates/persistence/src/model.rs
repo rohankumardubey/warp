@@ -938,8 +938,7 @@ pub struct AgentConversation {
     pub tasks: Vec<api::Task>,
 }
 
-/// Returns `true` if a task is shaped like a root task (no `dependencies`
-/// or `dependencies.parent_task_id.is_empty()`).
+/// Root task = no `dependencies` or `dependencies.parent_task_id.is_empty()`.
 fn task_is_root_shaped(task: &api::Task) -> bool {
     task.dependencies
         .as_ref()
@@ -947,19 +946,11 @@ fn task_is_root_shaped(task: &api::Task) -> bool {
         .unwrap_or(true)
 }
 
-/// If `tasks` matches the "optimistic stub + real upgraded root" pattern
-/// that local-no-harness Oz child conversations exhibit after the local
-/// optimistic task gets replaced by a server-issued task, returns the
-/// `id` of the stub that should be ignored on restore. Otherwise returns
-/// `None`.
-///
-/// The pattern: exactly two tasks, both shaped like a root task (`dependencies`
-/// is `None` or `dependencies.parent_task_id.is_empty()`), AND exactly one of
-/// them has zero `messages` while the other has at least one message. The
-/// zero-message task is the optimistic stub.
-///
-/// We deliberately do NOT delete the stub from disk; this is a read-time
-/// filter so the in-memory conversation skips the stub during restoration.
+/// Identifies the zero-message root task in the "optimistic stub + real
+/// upgraded root" pattern that local-no-harness Oz children persist when
+/// the optimistic root is later replaced by a server-issued task. Matches
+/// only when there are exactly two root-shaped tasks and exactly one has
+/// no messages; disk rows are untouched, callers filter in memory.
 pub fn optimistic_stub_task_id(tasks: &[api::Task]) -> Option<&str> {
     if tasks.len() != 2 {
         return None;
@@ -979,10 +970,7 @@ pub fn optimistic_stub_task_id(tasks: &[api::Task]) -> Option<&str> {
 }
 
 impl AgentConversation {
-    /// Returns a borrowed view of the tasks that should participate in
-    /// restoration. Excludes the optimistic stub when
-    /// [`optimistic_stub_task_id`] matches; otherwise returns references to
-    /// all tasks unchanged.
+    /// Borrowed task list with the optimistic stub filtered out.
     pub fn tasks_for_restore(&self) -> Vec<&api::Task> {
         match optimistic_stub_task_id(&self.tasks) {
             Some(stub_id) => self.tasks.iter().filter(|t| t.id != stub_id).collect(),
@@ -990,15 +978,9 @@ impl AgentConversation {
         }
     }
 
-    /// Consumes `self` and returns the owned task list with the optimistic
-    /// stub task (if any) removed. Canonical helper for the conversion
-    /// site in `convert_persisted_conversation_to_ai_conversation_with_metadata`
-    /// that needs to pass `Vec<api::Task>` into
-    /// `AIConversation::new_restored` (defined in the `warp` crate at
-    /// `app/src/ai/agent/conversation.rs`; no rustdoc link here because
-    /// cross-crate paths from `persistence` to `warp` are not expressible
-    /// without churn that adds no navigation value) without re-implementing
-    /// the stub-removal `retain`.
+    /// Owned-`Vec` variant of `tasks_for_restore`. Used by the conversion
+    /// site that hands the list to `AIConversation::new_restored` (in the
+    /// `warp` crate; cross-crate rustdoc link omitted by convention).
     pub fn into_tasks_for_restore(mut self) -> Vec<api::Task> {
         if let Some(stub_id) = optimistic_stub_task_id(&self.tasks).map(str::to_string) {
             self.tasks.retain(|task| task.id != stub_id);
@@ -1006,20 +988,14 @@ impl AgentConversation {
         self.tasks
     }
 
-    /// Returns the `id` of the optimistic stub task in this conversation, if
-    /// the optimistic-stub pattern matches. Wrapper around
-    /// [`optimistic_stub_task_id`].
+    /// Method form of [`optimistic_stub_task_id`].
     pub fn optimistic_stub_task_id(&self) -> Option<&str> {
         optimistic_stub_task_id(&self.tasks)
     }
 
-    /// Returns `true` if the conversation is restorable.
-    ///
-    /// A conversation is restorable if:
-    /// - It contains a single task or fewer (after filtering out the
-    ///   optimistic stub via [`Self::tasks_for_restore`]), OR
-    /// - It contains multiple tasks where every task other than the root task
-    ///   has a parent task ID.
+    /// True when the conversation can be reconstructed: ≤1 task after the
+    /// stub filter, or multiple tasks where every non-root task carries a
+    /// non-empty `parent_task_id`.
     pub fn is_restorable(&self) -> bool {
         let filtered = self.tasks_for_restore();
         if filtered.len() <= 1 {

@@ -52,19 +52,10 @@ pub use conversation_loader::{
     CLIAgentConversation, CloudConversationData,
 };
 
-/// Symmetric with [`crate::persistence::agent::MAX_PERSISTED_CONVERSATION_COUNT`].
-/// Bumped from 100 to 200 alongside the tree-aware prune fix so we don't
-/// arbitrarily clip the in-memory historical view to a smaller window than
-/// what's actually retained on disk. 200 covers roughly 10–40 orchestration
-/// sessions of history.
-///
-/// Practically, this read-side cap is currently moot: the disk-side prune
-/// (`crate::persistence::agent::MAX_PERSISTED_CONVERSATION_COUNT`) keeps
-/// the persisted set at or below the same limit, so by the time this code
-/// reads the historical conversations it will already be within the cap.
-/// The cap is retained as a defense-in-depth guard against future changes
-/// that bypass the disk prune (e.g. importing rows from another machine
-/// or relaxing the persistence-side ceiling).
+/// Mirrors [`crate::persistence::agent::MAX_PERSISTED_CONVERSATION_COUNT`].
+/// Moot at steady state because the disk-side prune already keeps the
+/// persisted set within this window; kept as defense-in-depth if rows ever
+/// arrive from another source (cross-machine import, prune bypass).
 pub(super) const MAX_HISTORICAL_CONVERSATIONS: usize = 200;
 
 /// Metadata for conversations
@@ -2328,40 +2319,18 @@ impl BlocklistAIHistoryModel {
         Ok(conversation)
     }
 
-    /// Merges cloud task / title data into an existing local placeholder
-    /// conversation. Used when a restored remote-child hidden pane needs to
-    /// hydrate from the cloud transcript while preserving the local
-    /// placeholder's `AIConversationId`, parent linkage, `task_id`, and
-    /// `is_remote_child` flag (so the placeholder stays the canonical key in
-    /// `child_agent_panes` and the orchestration topology indexes).
-    ///
-    /// Modeled on `insert_forked_conversation_from_tasks` but does not
-    /// allocate a new conversation; it rebuilds the conversation from the
-    /// cloud tasks under the existing local id and re-stamps the relevant
-    /// child-placeholder fields.
-    ///
-    /// # Precondition
-    /// The local placeholder identified by `local_placeholder_id` must
-    /// already exist in `conversations_by_id`. The placeholder is the
-    /// authoritative source for the orchestration linkage fields
-    /// (parent_conversation_id, parent_agent_id, agent_name, run_id,
-    /// is_remote_child, pinned). If it isn't present we have no anchor for
-    /// those fields, so we return an `anyhow::Error` and let the caller
-    /// fall back to its non-merge path instead of silently constructing a
-    /// detached merged conversation. The caller (`pane_group::hydrate_remote_child_transcript_in_place`)
-    /// already handles this error path with a tombstone fallback.
+    /// Rebuilds the local placeholder identified by `local_placeholder_id`
+    /// from the cloud `tasks` + `cloud_conversation`, keeping the
+    /// placeholder's local id and orchestration linkage (parent ids,
+    /// agent_name, run_id, is_remote_child, pinned) authoritative. Returns
+    /// `Err` when the placeholder isn't loaded so the caller can fall back
+    /// instead of silently producing a detached conversation.
     pub fn merge_cloud_tasks_into_existing_conversation(
         &mut self,
         local_placeholder_id: AIConversationId,
         tasks: Vec<warp_multi_agent_api::Task>,
         cloud_conversation: AIConversation,
     ) -> anyhow::Result<AIConversation> {
-        // Snapshot the placeholder's local-only fields so we can re-stamp
-        // them onto the merged conversation. This keeps the placeholder's
-        // identity (parent linkage, run_id/task_id, remote-child flag,
-        // agent name) authoritative; the cloud transcript only supplies
-        // tasks/title/server metadata. If the placeholder isn't loaded
-        // we abort — see the precondition note on this function.
         let placeholder = self
             .conversations_by_id
             .get(&local_placeholder_id)
@@ -2374,8 +2343,8 @@ impl BlocklistAIHistoryModel {
                 )
             })?;
 
-        // Build the cloud conversation_data so `new_restored` reconstructs
-        // server-side metadata (token, run_id, artifacts, etc.) directly.
+        // Placeholder owns orchestration linkage; cloud supplies
+        // tasks/title/server metadata.
         let cloud_conversation_data = AgentConversationData {
             server_conversation_token: cloud_conversation
                 .server_conversation_token()

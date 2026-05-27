@@ -64,13 +64,9 @@ pub fn convert_persisted_conversation_to_ai_conversation(
 pub fn convert_persisted_conversation_to_ai_conversation_with_metadata(
     persisted_conversation: AgentConversation,
 ) -> Option<AIConversation> {
-    // Pull the persisted record fields out of `persisted_conversation.conversation`
-    // (cheap String moves), then consume the rest of the value via
-    // `into_tasks_for_restore` which drops the optimistic stub task in-memory
-    // before we hand the owned `Vec<api::Task>` to `AIConversation::new_restored`.
-    // The stub-removal pattern (zero-message root paired with a real upgraded
-    // root, observed on local-no-harness Oz children) is implemented once on
-    // `AgentConversation`; see [`AgentConversation::into_tasks_for_restore`].
+    // Destructure the record (cheap String moves) then drop the optimistic
+    // stub via `into_tasks_for_restore` before handing the owned task list
+    // to `AIConversation::new_restored`.
     let AgentConversationRecord {
         conversation_id,
         conversation_data,
@@ -532,29 +528,21 @@ impl BlocklistAIHistoryModel {
                     conversation_data,
                 } = row;
 
-                // Child agent conversations are managed by their parent's
-                // status card and should not appear in navigation/history.
-                // Record the parent→child mapping before filtering so that
-                // create_missing_child_agent_panes can discover children
-                // before they are loaded into conversations_by_id.
+                // Orchestration children are managed by their parent's
+                // status card and don't appear in navigation/history, but the
+                // pill bar and transcript name resolver both look them up in
+                // `conversations_by_id`. Index the parent→child edge and
+                // eagerly hydrate the child here so those surfaces find it
+                // before the parent's hidden pane materializes lazily.
+                // Non-orchestration historical conversations stay on the
+                // lazy `restore_conversations` path; a later
+                // `restore_conversations` call overwrites the eager entry
+                // idempotently.
                 if let Some(parent_id) = conversation_data
                     .as_ref()
                     .and_then(|data| self.resolved_parent_conversation_id_from_persisted_data(data))
                 {
                     self.index_child_conversation(conversation_id, parent_id);
-                    // Eagerly hydrate the child conversation into
-                    // `conversations_by_id` so the pill bar and orchestration
-                    // transcript name resolution can find it before the
-                    // parent's hidden child pane materializes lazily. This is
-                    // restricted to orchestration children only — non-child
-                    // historical conversations continue to load lazily via
-                    // `restore_conversations`. We do NOT emit
-                    // `RestoredConversations`, touch
-                    // `live_conversation_ids_for_terminal_view`, or update
-                    // `terminal_view_created_at` here; those still happen
-                    // later when the hidden pane is materialized via
-                    // `restore_conversations`. A subsequent `restore_conversations`
-                    // call replaces this entry idempotently.
                     match convert_persisted_conversation_to_ai_conversation_with_metadata(
                         agent_conversation.clone(),
                     ) {
@@ -565,7 +553,7 @@ impl BlocklistAIHistoryModel {
                         None => {
                             log::warn!(
                                 "Failed to eager-hydrate orchestration child {conversation_id}; \
-                                 pill bar / name resolution will fall back to lazy materialization",
+                                 falling back to lazy materialization",
                             );
                         }
                     }
