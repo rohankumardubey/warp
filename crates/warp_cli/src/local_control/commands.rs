@@ -95,9 +95,64 @@ pub(super) fn run_app_command(
     match command {
         AppCommand::Ping(args) => run_action(args, ActionKind::AppPing, output_format),
         AppCommand::Version(args) => run_action(args, ActionKind::AppVersion, output_format),
-        AppCommand::Active(args) => run_action_with_params(
+        AppCommand::Active(args) => {
+            run_action_with_params(args, ActionKind::AppActive, EmptyParams {}, output_format)
+        }
+    }
+}
+
+pub(super) fn run_capability_command(
+    command: CapabilityCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        CapabilityCommand::List(args) => run_action_with_params(
             args,
-            ActionKind::AppActive,
+            ActionKind::CapabilityList,
+            EmptyParams {},
+            output_format,
+        ),
+        CapabilityCommand::Inspect(args) => run_action_with_params(
+            args.target,
+            ActionKind::CapabilityInspect,
+            ActionNameParams {
+                action: args.action,
+            },
+            output_format,
+        ),
+    }
+}
+
+pub(super) fn run_action_command(
+    command: ActionCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        ActionCommand::List(args) => {
+            run_action_with_params(args, ActionKind::ActionList, EmptyParams {}, output_format)
+        }
+        ActionCommand::Inspect(args) => run_action_with_params(
+            args.target,
+            ActionKind::ActionInspect,
+            ActionNameParams {
+                action: args.action,
+            },
+            output_format,
+        ),
+    }
+}
+
+pub(super) fn run_window_command(
+    command: WindowCommand,
+    output_format: OutputFormat,
+) -> Result<(), ControlError> {
+    match command {
+        WindowCommand::List(args) => {
+            run_action_with_params(args, ActionKind::WindowList, EmptyParams {}, output_format)
+        }
+        WindowCommand::Inspect(args) => run_action_with_params(
+            args,
+            ActionKind::WindowInspect,
             EmptyParams {},
             output_format,
         ),

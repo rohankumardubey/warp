@@ -1,12 +1,4 @@
-use ::local_control::protocol::{
-    BlockIdParams, BlockInspectResult, BlockListParams, BlockListResult, BlockSummary,
-    HistoryEntrySummary, HistoryListParams, HistoryListResult, InputStateResult, PaneTarget,
-    SessionTarget, TabTarget, TargetSelector, WindowTarget,
-};
-use ::local_control::{ActionKind, ControlError, ErrorCode};
-use warpui::{ModelContext, SingletonEntity, ViewHandle};
-
-use crate::local_control::resolver::require_active_window_id_for_action;
+use crate::local_control::resolver::target_window_id_for_target;
 use crate::local_control::LocalControlBridge;
 use crate::pane_group::{PaneGroup, PaneId};
 use crate::terminal::model::session::SessionId;
@@ -14,6 +6,13 @@ use crate::terminal::model::TerminalModel;
 use crate::terminal::view::TerminalView;
 use crate::terminal::History;
 use crate::workspace::Workspace;
+use ::local_control::protocol::{
+    BlockIdParams, BlockInspectResult, BlockListParams, BlockListResult, BlockSummary,
+    HistoryEntrySummary, HistoryListParams, HistoryListResult, InputStateResult, PaneTarget,
+    SessionTarget, TabTarget, TargetSelector,
+};
+use ::local_control::{ActionKind, ControlError, ErrorCode};
+use warpui::{ModelContext, SingletonEntity, ViewHandle};
 
 struct ResolvedTerminalTarget {
     terminal_view: ViewHandle<TerminalView>,
@@ -104,7 +103,7 @@ pub(crate) fn list_blocks(
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<serde_json::Value, ControlError> {
     validate_block_list_target(target)?;
-    let terminal = target_terminal_view(ActionKind::BlockList, ctx)?;
+    let terminal = target_terminal_view(ActionKind::BlockList, target, ctx)?;
     let result = terminal.read(ctx, |view, _| {
         let session_id = resolve_session_selector(
             target.session.as_ref(),
@@ -123,7 +122,7 @@ pub(crate) fn get_block(
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<serde_json::Value, ControlError> {
     validate_block_get_target(target)?;
-    let terminal = target_terminal_view(ActionKind::BlockInspect, ctx)?;
+    let terminal = target_terminal_view(ActionKind::BlockInspect, target, ctx)?;
     let result = terminal.read(ctx, |view, _| {
         let session_id = resolve_session_selector(
             target.session.as_ref(),
@@ -175,18 +174,6 @@ fn validate_active_terminal_target(
     target: &TargetSelector,
 ) -> Result<(), ControlError> {
     let action_name = action.as_str();
-    if matches!(target.window.as_ref(), Some(WindowTarget::Id { .. })) {
-        return Err(ControlError::new(
-            ErrorCode::StaleTarget,
-            format!("{action_name} cannot resolve the requested window id"),
-        ));
-    }
-    if !matches!(target.window.as_ref(), None | Some(WindowTarget::Active)) {
-        return Err(ControlError::new(
-            ErrorCode::InvalidSelector,
-            format!("{action_name} only supports the active window selector"),
-        ));
-    }
     if matches!(target.tab.as_ref(), Some(TabTarget::Id { .. })) {
         return Err(ControlError::new(
             ErrorCode::StaleTarget,
@@ -220,7 +207,7 @@ fn resolve_terminal_read_target(
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<ResolvedTerminalTarget, ControlError> {
     validate_terminal_read_target(action, target)?;
-    let window_id = require_active_window_id_for_action(ctx.windows().active_window(), action)?;
+    let window_id = target_window_id_for_target(ctx, target, action)?;
     if let Some(workspace) = ctx
         .views_of_type::<Workspace>(window_id)
         .and_then(|workspaces| workspaces.into_iter().next())
@@ -280,9 +267,10 @@ fn resolve_terminal_in_pane_group(
 
 fn target_terminal_view(
     action: ActionKind,
+    target: &TargetSelector,
     ctx: &mut ModelContext<LocalControlBridge>,
 ) -> Result<ViewHandle<TerminalView>, ControlError> {
-    let window_id = require_active_window_id_for_action(ctx.windows().active_window(), action)?;
+    let window_id = target_window_id_for_target(ctx, target, action)?;
     let workspace = ctx
         .views_of_type::<Workspace>(window_id)
         .and_then(|workspaces| workspaces.into_iter().next())
