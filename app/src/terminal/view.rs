@@ -10993,8 +10993,8 @@ impl TerminalView {
         if let Some(prev_block_metadata) = self.active_block_metadata.take() {
             // Only send event to save app state when the block is post bootstrap
             // and working directory has changed.
-            if prev_block_metadata.current_working_directory()
-                != block_metadata.current_working_directory()
+            if prev_block_metadata.display_working_directory()
+                != block_metadata.display_working_directory()
                 && is_done_bootstrapping
             {
                 ctx.emit(Event::AppStateChanged);
@@ -11009,14 +11009,14 @@ impl TerminalView {
             }
 
             // Check if the block is done bootstrapping and the directory is set.
-            if let Some(active_directory) = block_metadata.current_working_directory() {
+            if let Some(active_directory) = block_metadata.display_working_directory() {
                 // See `BlockMetadataUpdateSource` for why OSC 7 needs the
                 // CWD-changed gate; precmd keeps its once-per-block semantics.
                 let should_run_detection = match source {
                     BlockMetadataUpdateSource::Precmd => true,
                     BlockMetadataUpdateSource::Osc7 => {
-                        prev_block_metadata.current_working_directory()
-                            != block_metadata.current_working_directory()
+                        prev_block_metadata.display_working_directory()
+                            != block_metadata.display_working_directory()
                     }
                 };
                 if is_done_bootstrapping && should_run_detection {
@@ -22445,7 +22445,7 @@ impl TerminalView {
         let cwd_str = self
             .active_block_metadata
             .as_ref()
-            .and_then(BlockMetadata::current_working_directory)?;
+            .and_then(BlockMetadata::display_working_directory)?;
 
         if self.session_is_local(session_id, ctx) {
             // Local session: canonicalize to resolve symlinks / normalize.

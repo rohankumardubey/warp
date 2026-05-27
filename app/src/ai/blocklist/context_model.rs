@@ -530,7 +530,7 @@ impl BlocklistAIContextModel {
         ctx: &mut ModelContext<Self>,
     ) {
         let pwd = block_metadata
-            .current_working_directory()
+            .display_working_directory()
             .map(|s| PathBuf::from(s.to_owned()));
         if let Some(session_id) = block_metadata.session_id() {
             if let Some(active_session) = sessions.as_ref(ctx).get(session_id) {

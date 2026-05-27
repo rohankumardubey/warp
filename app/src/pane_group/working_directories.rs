@@ -495,6 +495,7 @@ impl WorkingDirectoriesModel {
             self.focused_repo.get(&pane_group_id).cloned().flatten();
 
         // Resolve a local path to its detected repository root, or keep the path as-is if no repo is found.
+        // No filesystem I/O — uses the cached repo root store.
         let root_for_path = |path: PathBuf| {
             DetectedRepositories::as_ref(ctx)
                 .get_root_for_path(&LocalOrRemotePath::Local(path.clone()))
@@ -502,10 +503,7 @@ impl WorkingDirectoriesModel {
                 .unwrap_or(path)
         };
 
-        // Convert a CanonicalizedPath (already canonical) to its repo root.
-        // No filesystem I/O — the path was canonicalized once at the shell boundary.
-        let root_for_canonical =
-            |cp: &CanonicalizedPath| -> PathBuf { root_for_path(cp.as_path_buf().clone()) };
+        let root_for_local_str = |cwd: &str| -> PathBuf { root_for_path(PathBuf::from(cwd)) };
 
         // Split terminal CWDs into local and remote buckets.
         let mut local_terminal_cwds: Vec<(EntityId, String)> = Vec::new();
@@ -524,7 +522,7 @@ impl WorkingDirectoriesModel {
         // Collapse working directories to their nearest repository root (when detected).
         let mut file_path_ancestors: HashSet<PathBuf> = local_terminal_cwds
             .iter()
-            .map(|(_, cwd)| root_for_canonical(cwd))
+            .map(|(_, cwd)| root_for_local_str(cwd))
             .collect();
 
         // Split editor paths into local and remote buckets.
@@ -541,12 +539,13 @@ impl WorkingDirectoriesModel {
             }
         }
 
-        let local_cwds: Vec<(EntityId, String)> = local_editor_paths
+        let local_cwds: Vec<(EntityId, PathBuf)> = local_editor_paths
             .into_iter()
             .filter_map(|(view_id, path)| {
+                let path_buf = PathBuf::from(&path);
                 let resolved_path = self
-                    .get_repo_root_for_path(&path, ctx)
-                    .or_else(|| path.parent().map(|p| p.to_path_buf()))?;
+                    .get_repo_root_for_path(&path_buf, ctx)
+                    .or_else(|| path_buf.parent().map(|p| p.to_path_buf()))?;
 
                 if file_path_ancestors.insert(resolved_path.clone()) {
                     Some((view_id, resolved_path))
@@ -559,7 +558,7 @@ impl WorkingDirectoriesModel {
         // Build the local root paths for pane_groups.
         let new_local_root_paths: Vec<PathBuf> = local_terminal_cwds
             .iter()
-            .map(|(_, cwd)| root_for_canonical(cwd))
+            .map(|(_, cwd)| root_for_local_str(cwd))
             .chain(
                 local_cwds
                     .iter()
@@ -620,11 +619,10 @@ impl WorkingDirectoriesModel {
         new_roots.extend(new_local_root_paths.iter().cloned());
 
         // Build mapping from directories to their terminal IDs (keyed by LocalOrRemotePath).
-        // Local paths come from `root_for_raw_path` → `normalize_cwd`.
         let mut new_root_to_terminal: HashMap<LocalOrRemotePath, EntityId> = local_terminal_cwds
             .iter()
-            .filter_map(|(terminal_id, cwd)| {
-                root_for_raw_path(cwd).map(|p| (LocalOrRemotePath::Local(p), *terminal_id))
+            .map(|(terminal_id, cwd)| {
+                (LocalOrRemotePath::Local(root_for_local_str(cwd)), *terminal_id)
             })
             .collect();
         new_root_to_terminal

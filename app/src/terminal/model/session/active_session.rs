@@ -31,12 +31,12 @@ impl ActiveSession {
             let new_pwd = match event {
                 ModelEvent::BlockMetadataReceived(e) => Some(
                     e.block_metadata
-                        .current_working_directory()
+                        .display_working_directory()
                         .map(|cwd| cwd.to_owned()),
                 ),
                 ModelEvent::BlockWorkingDirectoryUpdated(e) => Some(
                     e.block_metadata
-                        .current_working_directory()
+                        .display_working_directory()
                         .map(|cwd| cwd.to_owned()),
                 ),
                 _ => None,
