@@ -69,6 +69,7 @@ Persistent settings changes, Warp Drive creation or sharing, cross-app preferenc
    - Active pane in the selected tab.
    - Active session in the selected pane.
    - Active or selected terminal block in the selected session when a current block is unambiguous.
+   For window-scoped mutations, an omitted or active window selector may fall back to the sole existing window when no active window is reported, because that target is still unambiguous. If there are no windows, the request fails with `missing_target`; if multiple windows exist and none is active, it fails with `ambiguous_target`.
 10. Every selector family supports explicit opaque IDs returned by introspection. Selector families may also support scoped indices, titles/names, or paths where those concepts are already user-visible, but IDs remain the preferred automation surface.
    - Window selectors support `active`, opaque window IDs, window indices from `window list`, and exact window titles for interactive use.
    - Tab selectors support `active`, opaque tab IDs, tab indices scoped to the resolved window, and exact tab titles for interactive use.
@@ -224,7 +225,7 @@ All commands that address a running app target accept the same selector flags wh
 - File commands use path arguments or `--path <path>` where the path is the selected file entity; `--line <n>` and `--column <n>` refine the location when supported.
 - Drive commands use object ID arguments or `--drive-id <id>` where the ID is the selected Warp Drive entity; name/path lookup must be type-scoped when supported.
 - `--output-format <pretty|json|ndjson|text>` controls output shape and remains globally available.
-Within a selector family, specifying more than one form is invalid. For example, `--tab-id` conflicts with `--tab-index`, `--tab-title`, and `--tab`. Omitted lower-level selectors use active defaults only when that active target is unambiguous. Explicit IDs must resolve exactly or fail with `stale_target`; index/title/name/path selectors that match zero targets fail with `missing_target`, and selectors that match multiple targets fail with `ambiguous_target`.
+Within a selector family, specifying more than one form is invalid. For example, `--tab-id` conflicts with `--tab-index`, `--tab-title`, and `--tab`. Omitted lower-level selectors use active defaults only when the resolved target is unambiguous; window-scoped mutations may use the sole existing window when no active window is reported. Explicit IDs must resolve exactly or fail with `stale_target`; index/title/name/path selectors that match zero targets fail with `missing_target`, and selectors that match multiple targets fail with `ambiguous_target`.
 ### Read-only command set
 The read-only branches should implement the following commands before mutating catalog expansion begins: `zach/warp-cli-readonly-metadata` owns structural metadata reads, and `zach/warp-cli-readonly-data-settings` owns underlying-data reads plus read-only settings/appearance/docs. Read-only does not mean one permission: metadata reads and underlying data reads are separate grant categories.
 Metadata and capability reads:

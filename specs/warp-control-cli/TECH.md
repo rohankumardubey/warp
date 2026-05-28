@@ -232,7 +232,7 @@ LocalControlBridge::handle_request (main thread)
   │   └─ ActionKind::TabCreate
   │       ├─ validate_tab_create_target(&request.target)
   │       ├─ ctx.windows().active_window()
-  │       │   └─ if none: return invalid_selector / missing_target
+  │       │   └─ if none: resolve the sole window, or return missing_target / ambiguous_target
   │       ├─ ctx.views_of_type::<Workspace>(window_id)
   │       └─ workspace.update(ctx, |workspace, ctx| {
   │             workspace.handle_action(
@@ -248,7 +248,7 @@ LocalControlBridge::handle_request (main thread)
 - **Synchronous result.** Unlike fire-and-forget patterns (e.g., URI intent dispatch in `app/src/uri/mod.rs`), the `spawn` call returns a concrete `Result<R, ModelDropped>`, so the HTTP handler can produce a structured success or error response.
 - **Reuses existing infrastructure.** `ModelSpawner` is already used throughout the codebase for background-to-main-thread communication (e.g., async file I/O results, network responses). No new concurrency primitive is needed.
 - **Action dispatch reuses existing app behavior.** The bridge calls `workspace.handle_action(&WorkspaceAction::AddTerminalTab { ... }, ctx)` — the exact same method the UI keybinding system uses. This ensures the control CLI produces identical behavior to the corresponding user action, including side effects like tab count updates, focus changes, and event emissions.
-- **Deterministic targeting.** The bridge must not silently fall back from the active window to an arbitrary ordered window for mutating actions. If the caller relies on the default active selector and no active window exists, return a structured missing-target or invalid-selector error. If future command forms allow explicit window IDs, resolve the explicit ID exactly or return `stale_target`.
+- **Deterministic targeting.** The bridge may use an active/default window selector for mutating actions only when the target is deterministic: first use the active Warp window, then fall back to the sole window if exactly one window exists. If no window exists, return `missing_target`; if more than one window exists and none is active, return `ambiguous_target`. If future command forms allow explicit window IDs, resolve the explicit ID exactly or return `stale_target`.
 #### Adding new action handlers
 To add a new action to the bridge:
 1. Add an entry to the macro-backed `ActionKind` catalog in `crates/local_control/src/catalog.rs`.
@@ -268,7 +268,7 @@ Recommended resolution order:
 5. Resolve session only for session-scoped commands.
 6. Resolve block/file/Drive selectors only for commands whose action metadata declares that target family.
 Selector behavior:
-- `active` resolves from current app focus/selection state.
+- `active` resolves from current app focus/selection state. For window-scoped mutations in the first slice, a missing active window may resolve to the sole existing window because that target is still unambiguous; zero matching windows return `missing_target`, and multiple windows without an active window return `ambiguous_target`.
 - Explicit opaque IDs must resolve exactly or return `stale_target`.
 - Index selectors are allowed only for user-visible indexed concepts and should resolve to a concrete opaque ID before execution.
 - Title, name, and path selectors are convenience selectors. They must be exact by default, document any future fuzzy behavior explicitly, and return `ambiguous_target` when more than one target matches.

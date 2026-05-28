@@ -394,8 +394,8 @@ This category requires authenticated scripting identity plus explicit user or po
 Targeting is part of security. The protocol must not convert ambiguous or stale selectors into best-effort mutations.
 Rules:
 - Instance selection happens before request dispatch and must be explicit when ambiguous.
-- `active` selectors may be ergonomic defaults only when the active target is unambiguous.
-- If no active target exists for a mutating request, return `missing_target` or `invalid_selector`.
+- `active` selectors may be ergonomic defaults only when the resolved target is unambiguous. For window-scoped mutations, the resolver first uses the active window and may fall back to the sole existing window when exactly one window exists.
+- If no active target exists for a mutating request and no action-specific deterministic fallback applies, return `missing_target` or `invalid_selector`; if multiple fallback candidates exist, return `ambiguous_target`.
 - Explicit opaque IDs must resolve exactly or return `stale_target`.
 - Index selectors must resolve to concrete IDs before execution and must not race into a different target silently.
 - Session-scoped requests against non-terminal panes return `target_state_conflict`.
@@ -457,7 +457,7 @@ Important errors include:
 - `execution_context_not_allowed` when the action or requested grant is not allowed from the verified invocation context, such as an external client attempting an in-Warp-only authenticated-user action;
 - `ambiguous_instance` when multiple compatible instances cannot be resolved safely;
 - `invalid_selector` for malformed or unsupported selector syntax;
-- `missing_target` when an active/default target does not exist;
+- `missing_target` when an active/default target does not exist and no deterministic fallback target exists;
 - `stale_target` when an explicit target ID no longer exists;
 - `unsupported_action` for actions not implemented by the selected instance;
 - `not_allowlisted` for actions intentionally excluded from the public control surface;
