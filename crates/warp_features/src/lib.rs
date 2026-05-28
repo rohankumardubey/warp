@@ -879,6 +879,9 @@ pub enum FeatureFlag {
 
     /// Gates the Grouped Tabs feature.
     GroupedTabs,
+
+    /// Enables the bundled feedback skill in Warp.
+    FeedbackSkill,
 }
 
 static FLAG_STATES: [AtomicBool; cardinality::<FeatureFlag>()] =

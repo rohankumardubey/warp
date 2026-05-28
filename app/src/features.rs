@@ -401,6 +401,8 @@ fn enabled_features() -> HashSet<FeatureFlag> {
         FeatureFlag::OzChangelogUpdates,
         #[cfg(feature = "bundled_skills")]
         FeatureFlag::BundledSkills,
+        #[cfg(feature = "feedback_skill")]
+        FeatureFlag::FeedbackSkill,
         #[cfg(feature = "oz_launch_modal")]
         FeatureFlag::OzLaunchModal,
         #[cfg(feature = "open_warp_launch_modal")]

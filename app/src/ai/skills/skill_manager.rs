@@ -29,11 +29,15 @@ pub enum BundledSkillActivation {
     /// Always active.
     Always,
     /// Active only when the built-in feedback skill setting is enabled.
+    /// Temporarily disabled due to its tendency to be called by the agent without user intent.
+    #[allow(unused)]
     FeedbackSkillSetting,
     /// Active only when a specific MCP server is running.
     RequiresMcp(McpIntegration),
     /// Active only when a specific file exists on disk.
     RequiresFile(PathBuf),
+    /// Active only when a specific feature flag is enabled.
+    RequiresFeatureFlag(FeatureFlag),
 }
 
 impl BundledSkillActivation {
@@ -45,6 +49,7 @@ impl BundledSkillActivation {
                 TemplatableMCPServerManager::as_ref(ctx).is_mcp_server_running(*integration)
             }
             Self::RequiresFile(path) => path.exists(),
+            Self::RequiresFeatureFlag(flag) => flag.is_enabled(),
         }
     }
 }
@@ -624,7 +629,7 @@ fn icon_for_bundled_skill(skill_id: &str) -> Icon {
 /// file use `RequiresFile` so they only appear when the resource is present.
 fn activation_for_bundled_skill(skill_id: &str, resources_dir: &Path) -> BundledSkillActivation {
     match skill_id {
-        "feedback" => BundledSkillActivation::FeedbackSkillSetting,
+        "feedback" => BundledSkillActivation::RequiresFeatureFlag(FeatureFlag::FeedbackSkill),
         "modify-settings" => {
             BundledSkillActivation::RequiresFile(resources_dir.join("settings_schema.json"))
         }
