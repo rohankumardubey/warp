@@ -11,6 +11,12 @@ use std::pin::Pin;
 use std::rc::Rc;
 use std::time::{Duration, SystemTime};
 
+/// Maximum file size (in bytes) that the editor will load into a buffer.
+/// Files larger than this are rejected with `FileLoadError::FileTooLarge`
+/// to prevent multi-gigabyte memory usage from cascading buffer, styled-block,
+/// layout, and diff allocations.
+const MAX_EDITOR_FILE_SIZE: u64 = 50 * 1024 * 1024; // 50 MB
+
 use async_channel::Sender;
 use futures::io::{AsyncBufReadExt, BufReader};
 use futures::StreamExt;
@@ -411,12 +417,24 @@ impl FileModel {
         let use_individual_watcher = watcher_type == WatcherType::Individual;
         let future = ctx.spawn(
             async move {
-                let contents = async_fs::read_to_string(&file_path_buf)
+                // Check file size before reading to prevent multi-GB memory
+                // allocations when opening very large files.
+                let metadata = async_fs::metadata(&file_path_buf)
                     .await
-                    .map_err(FileLoadError::from);
-                (file_id, contents)
+                    .map_err(FileLoadError::from)?;
+                let file_size = metadata.len();
+                if file_size > MAX_EDITOR_FILE_SIZE {
+                    return Err(FileLoadError::FileTooLarge {
+                        size_bytes: file_size,
+                        limit_bytes: MAX_EDITOR_FILE_SIZE,
+                    });
+                }
+
+                async_fs::read_to_string(&file_path_buf)
+                    .await
+                    .map_err(FileLoadError::from)
             },
-            move |me, (file_id, load_result), ctx| match load_result {
+            move |me, load_result: Result<String, FileLoadError>, ctx| match load_result {
                 Ok(content) => {
                     let version = ContentVersion::new();
                     me.set_version(file_id, version);
