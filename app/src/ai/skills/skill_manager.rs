@@ -21,7 +21,8 @@ use super::SkillDescriptor;
 use crate::ai::mcp::{McpIntegration, TemplatableMCPServerManager};
 use crate::ai::skills::skill_utils::unique_skills;
 use crate::keyboard::keybinding_file_path;
-use crate::settings::{user_preferences_toml_file_path, AISettings};
+use crate::settings::user_preferences_toml_file_path;
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 /// Activation condition for a bundled skill.
 #[derive(Debug, Clone)]
@@ -40,7 +41,9 @@ impl BundledSkillActivation {
     pub fn is_enabled(&self, ctx: &AppContext) -> bool {
         match self {
             Self::Always => true,
-            Self::FeedbackSkillSetting => *AISettings::as_ref(ctx).feedback_bundled_skill_enabled,
+            Self::FeedbackSkillSetting => {
+                UserWorkspaces::as_ref(ctx).is_feedback_bundled_skill_enabled(ctx)
+            }
             Self::RequiresMcp(integration) => {
                 TemplatableMCPServerManager::as_ref(ctx).is_mcp_server_running(*integration)
             }

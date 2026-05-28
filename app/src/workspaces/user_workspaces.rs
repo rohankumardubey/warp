@@ -1426,6 +1426,25 @@ impl UserWorkspaces {
             .unwrap_or_default()
     }
 
+    pub fn is_feedback_bundled_skill_enabled(&self, app: &AppContext) -> bool {
+        match self
+            .current_team()
+            .map(|team| {
+                team.organization_settings
+                    .feedback_skill_settings
+                    .setting
+                    .clone()
+            })
+            .unwrap_or(AdminEnablementSetting::RespectUserSetting)
+        {
+            AdminEnablementSetting::Disable => false,
+            AdminEnablementSetting::Enable => true,
+            AdminEnablementSetting::RespectUserSetting => {
+                *AISettings::as_ref(app).feedback_bundled_skill_enabled
+            }
+        }
+    }
+
     pub fn is_ai_allowed_in_remote_sessions(&self) -> bool {
         self.current_team()
             .map(|team| {

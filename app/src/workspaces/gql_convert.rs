@@ -49,9 +49,9 @@ use super::workspace::{
     AiPermissionsSettings, AmbientAgentsPolicy, BillingCycleUsageData, BillingCycleUsageEntry,
     BillingCycleUsageSummary, BillingMetadata, CloudConversationStorageSettings,
     CodebaseContextSettings, CustomerType, DelinquencyStatus, EmailInvite, EnterpriseSecretRegex,
-    HostEnablementSetting, InstanceShape, InviteLinkDomainRestriction, LinkSharingSettings,
-    LlmSettings, MaxPriorCycles, SandboxedAgentSettings, SecretRedactionSettings,
-    SessionSharingPolicy, SharedNotebooksPolicy, SharedWorkflowsPolicy,
+    FeedbackSkillSettings, HostEnablementSetting, InstanceShape, InviteLinkDomainRestriction,
+    LinkSharingSettings, LlmSettings, MaxPriorCycles, SandboxedAgentSettings,
+    SecretRedactionSettings, SessionSharingPolicy, SharedNotebooksPolicy, SharedWorkflowsPolicy,
     TelemetryDataCollectionPolicy, TelemetrySettings, Tier, UgcCollectionEnablementSetting,
     UgcCollectionSettings, UgcDataCollectionPolicy, UsageBasedPricingPolicy,
     UsageVisibilityGranularity, UsageVisibilityPolicy, WarpAiPolicy, Workspace,
@@ -893,6 +893,12 @@ impl From<GqlWorkspaceSettings> for WorkspaceSettings {
             codebase_context_settings: CodebaseContextSettings {
                 setting: gql_workspace_settings
                     .codebase_context_settings
+                    .setting
+                    .into(),
+            },
+            feedback_skill_settings: FeedbackSkillSettings {
+                setting: gql_workspace_settings
+                    .feedback_skill_settings
                     .setting
                     .into(),
             },

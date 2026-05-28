@@ -786,6 +786,18 @@ pub enum AdminEnablementSetting {
 pub struct CloudConversationStorageSettings {
     pub setting: AdminEnablementSetting,
 }
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct FeedbackSkillSettings {
+    pub setting: AdminEnablementSetting,
+}
+
+impl Default for FeedbackSkillSettings {
+    fn default() -> Self {
+        Self {
+            setting: AdminEnablementSetting::Disable,
+        }
+    }
+}
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct AiPermissionsSettings {
@@ -907,6 +919,8 @@ pub struct WorkspaceSettings {
     pub usage_based_pricing_settings: UsageBasedPricingSettings,
     pub addon_credits_settings: AddonCreditsSettings,
     pub codebase_context_settings: CodebaseContextSettings,
+    #[serde(default)]
+    pub feedback_skill_settings: FeedbackSkillSettings,
     pub sandboxed_agent_settings: Option<SandboxedAgentSettings>,
     /// The team-level agent attribution setting. When `Enable` or `Disable`, the
     /// user toggle is locked. When `RespectUserSetting` (or absent), the user can choose.

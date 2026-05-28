@@ -26,8 +26,8 @@ use crate::workspaces::team_tester::TeamTesterStatus;
 use crate::workspaces::update_manager::TeamUpdateManager;
 use crate::workspaces::user_workspaces::UserWorkspaces;
 use crate::workspaces::workspace::{
-    AdminEnablementSetting, CodebaseContextSettings, HostEnablementSetting, LlmHostSettings,
-    Workspace,
+    AdminEnablementSetting, CodebaseContextSettings, FeedbackSkillSettings, HostEnablementSetting,
+    LlmHostSettings, Workspace,
 };
 
 #[derive(Default)]
@@ -714,6 +714,123 @@ fn test_agent_attribution_respects_user_setting() {
                 setting,
                 AdminEnablementSetting::RespectUserSetting,
                 "attribution should be RespectUserSetting when the team defers to user preference"
+            );
+        });
+    })
+}
+
+#[test]
+fn test_feedback_bundled_skill_uses_user_setting_without_workspace() {
+    App::test((), |mut app| async move {
+        initialize_app(
+            &mut app,
+            CachedResources { workspaces: vec![] },
+            Arc::new(MockTeamClient::new()),
+            Arc::new(MockWorkspaceClient::new()),
+        );
+
+        app.read(|ctx| {
+            assert!(
+                UserWorkspaces::as_ref(ctx).is_feedback_bundled_skill_enabled(ctx),
+                "feedback bundled skill should use the enabled user setting when there is no workspace"
+            );
+        });
+    })
+}
+
+#[test]
+fn test_feedback_bundled_skill_disabled_by_default_team_setting() {
+    let team = team_for_test();
+    let workspace = workspace_for_test(&team);
+
+    App::test((), |mut app| async move {
+        initialize_app(
+            &mut app,
+            CachedResources {
+                workspaces: vec![workspace],
+            },
+            Arc::new(MockTeamClient::new()),
+            Arc::new(MockWorkspaceClient::new()),
+        );
+
+        app.read(|ctx| {
+            assert!(
+                !UserWorkspaces::as_ref(ctx).is_feedback_bundled_skill_enabled(ctx),
+                "feedback bundled skill should default to disabled for team workspaces"
+            );
+        });
+    })
+}
+
+#[test]
+fn test_feedback_bundled_skill_respects_user_setting() {
+    let mut team = team_for_test();
+    team.organization_settings.feedback_skill_settings = FeedbackSkillSettings {
+        setting: AdminEnablementSetting::RespectUserSetting,
+    };
+    let workspace = workspace_for_test(&team);
+
+    App::test((), |mut app| async move {
+        initialize_app(
+            &mut app,
+            CachedResources {
+                workspaces: vec![workspace],
+            },
+            Arc::new(MockTeamClient::new()),
+            Arc::new(MockWorkspaceClient::new()),
+        );
+
+        app.read(|ctx| {
+            assert!(
+                UserWorkspaces::as_ref(ctx).is_feedback_bundled_skill_enabled(ctx),
+                "feedback bundled skill should be enabled when team respects the default enabled user setting"
+            );
+        });
+
+        AISettings::handle(&app).update(&mut app, |settings, ctx| {
+            settings
+                .feedback_bundled_skill_enabled
+                .load_value(false, true, ctx)
+                .expect("test setting update should succeed");
+        });
+
+        app.read(|ctx| {
+            assert!(
+                !UserWorkspaces::as_ref(ctx).is_feedback_bundled_skill_enabled(ctx),
+                "feedback bundled skill should be disabled when team respects the disabled user setting"
+            );
+        });
+    })
+}
+
+#[test]
+fn test_feedback_bundled_skill_forced_on_by_team() {
+    let mut team = team_for_test();
+    team.organization_settings.feedback_skill_settings = FeedbackSkillSettings {
+        setting: AdminEnablementSetting::Enable,
+    };
+    let workspace = workspace_for_test(&team);
+
+    App::test((), |mut app| async move {
+        initialize_app(
+            &mut app,
+            CachedResources {
+                workspaces: vec![workspace],
+            },
+            Arc::new(MockTeamClient::new()),
+            Arc::new(MockWorkspaceClient::new()),
+        );
+        AISettings::handle(&app).update(&mut app, |settings, ctx| {
+            settings
+                .feedback_bundled_skill_enabled
+                .load_value(false, true, ctx)
+                .expect("test setting update should succeed");
+        });
+
+        app.read(|ctx| {
+            assert!(
+                UserWorkspaces::as_ref(ctx).is_feedback_bundled_skill_enabled(ctx),
+                "feedback bundled skill should be enabled when forced on by the team"
             );
         });
     })

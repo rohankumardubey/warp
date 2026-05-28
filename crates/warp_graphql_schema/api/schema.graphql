@@ -640,6 +640,14 @@ input CloudConversationStorageSettingsInput {
   setting: AdminEnablementSetting
 }
 
+type FeedbackSkillSettings {
+  setting: AdminEnablementSetting!
+}
+
+input FeedbackSkillSettingsInput {
+  setting: AdminEnablementSetting
+}
+
 type CloudEnvironment {
   config: CloudEnvironmentConfig!
   creator: PublicUserProfile
@@ -3936,6 +3944,7 @@ input UpdateWorkspaceSettingsInput {
   setDomainCaptureSettings: DomainCaptureSettingsInput
   setEnterpriseAnalyticsDataCollectionSettings: EnterpriseAnalyticsDataCollectionSettingsInput
   setEnterpriseBillingSettings: EnterpriseBillingSettingsInput
+  setFeedbackSkillSettings: FeedbackSkillSettingsInput
   setHarnessSettings: HarnessSettingsInput
   setLinkSharingSettings: LinkSharingSettingsInput
   setLlmSettings: LlmSettingsInput
@@ -4348,6 +4357,7 @@ type WorkspaceSettings {
   domainCaptureSettings: DomainCaptureSettings!
   enterpriseAnalyticsDataCollectionSettings: EnterpriseAnalyticsDataCollectionSettings!
   enterpriseBillingSettings: EnterpriseBillingSettings
+  feedbackSkillSettings: FeedbackSkillSettings!
   harnessSettings: HarnessSettings
   isDiscoverable: Boolean!
   isInviteLinkEnabled: Boolean!

@@ -15,6 +15,7 @@ use watcher::HomeDirectoryWatcher;
 use super::*;
 use crate::settings::AISettings;
 use crate::warp_managed_paths_watcher::WarpManagedPathsWatcher;
+use crate::workspaces::user_workspaces::UserWorkspaces;
 
 // ============================================================================
 // Tests for get_skills_for_working_directory subdirectory scoping
@@ -79,6 +80,7 @@ fn get_skills_for_working_directory_scopes_subdirectory_skills() {
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         let repo_handle = app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
@@ -202,6 +204,7 @@ fn get_skills_for_working_directory_name_collision_returns_both() {
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         let repo_handle = app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
@@ -299,6 +302,7 @@ fn cloud_environment_skills_always_included() {
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         let repo_handle = app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
@@ -502,6 +506,7 @@ fn bundled_feedback_skill_is_enabled_by_default() {
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
@@ -532,6 +537,7 @@ fn disabling_feedback_bundled_skill_hides_only_that_bundled_skill() {
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
@@ -592,6 +598,7 @@ fn disabling_feedback_bundled_skill_does_not_hide_user_feedback_skill() {
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         let repo_handle = app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
@@ -656,6 +663,7 @@ fn disabling_feedback_bundled_skill_blocks_active_reference_lookup_only_for_bund
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
@@ -743,6 +751,7 @@ fn best_supported_provider_fast_path_returns_deduped_provider() {
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
@@ -769,6 +778,7 @@ fn best_supported_provider_remaps_to_supported_provider() {
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
@@ -800,6 +810,7 @@ fn best_supported_provider_falls_back_when_no_match() {
     App::test((), |mut app| async move {
         app.add_singleton_model(DirectoryWatcher::new);
         app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(UserWorkspaces::default_mock);
         app.add_singleton_model(|_| DetectedRepositories::default());
         app.add_singleton_model(RepoMetadataModel::new);
         app.add_singleton_model(HomeDirectoryWatcher::new_for_test);

@@ -150,6 +150,7 @@ pub struct WorkspaceSettings {
     pub usage_based_pricing_settings: UsageBasedPricingSettings,
     pub addon_credits_settings: AddonCreditsSettings,
     pub codebase_context_settings: CodebaseContextSettings,
+    pub feedback_skill_settings: FeedbackSkillSettings,
     pub sandboxed_agent_settings: Option<SandboxedAgentSettings>,
     pub ambient_agent_settings: Option<AmbientAgentSettings>,
 }
@@ -166,6 +167,10 @@ pub struct UgcCollectionSettings {
 
 #[derive(cynic::QueryFragment, Debug, Clone)]
 pub struct CloudConversationStorageSettings {
+    pub setting: AdminEnablementSetting,
+}
+#[derive(cynic::QueryFragment, Debug, Clone)]
+pub struct FeedbackSkillSettings {
     pub setting: AdminEnablementSetting,
 }
 
