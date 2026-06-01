@@ -37,7 +37,7 @@ const MONTHLY_OVERAGES_SPEND_LIMIT_REACHED_ACTION_TEXT: &str = "Increase monthly
 const UPGRADE_TEXT: &str = "Upgrade";
 const COMPARE_PLANS_TEXT: &str = "Compare plans";
 const CONTACT_SUPPORT_TEXT: &str = "Contact support";
-const CONTACT_TEAM_ADMIN_TEXT: &str = "Contact your team admin";
+const CONTACT_TEAM_ADMIN_TEXT: &str = "Contact team admin";
 const CONTACT_ACCOUNT_EXECUTIVE_TEXT: &str = "Contact your account executive";
 const NON_ADMIN_CONTACT_ADMIN_TEXT: &str = ", contact a team admin";
 const NON_ADMIN_ASK_ADMIN_TO_ENABLE_OVERAGES_TEXT: &str = ", ask a team admin to enable overages";
@@ -349,18 +349,24 @@ impl PromptAlertView {
                 }
             }
             PromptAlertState::RequestLimitReached => {
-                text_fragments.push(FormattedTextFragment::plain_text("  "));
-                let is_enterprise_team =
-                    current_team.is_some_and(|team| team.billing_metadata.is_enterprise_plan());
-                if let Some(team) = current_team {
-                    if is_enterprise_team {
-                        let contact_text = if has_admin_permissions {
-                            CONTACT_ACCOUNT_EXECUTIVE_TEXT
-                        } else {
-                            CONTACT_TEAM_ADMIN_TEXT
-                        };
-                        text_fragments.push(FormattedTextFragment::plain_text(contact_text));
-                    } else if team.billing_metadata.can_upgrade_to_higher_tier_plan() {
+                let is_enterprise_workspace = UserWorkspaces::as_ref(app)
+                    .current_workspace()
+                    .is_some_and(|workspace| workspace.billing_metadata.is_enterprise_plan());
+                if is_enterprise_workspace {
+                    text_fragments.push(FormattedTextFragment::plain_text(". "));
+                    if has_admin_permissions {
+                        text_fragments.push(FormattedTextFragment::plain_text(
+                            CONTACT_ACCOUNT_EXECUTIVE_TEXT,
+                        ));
+                    } else {
+                        text_fragments.push(FormattedTextFragment::hyperlink_action(
+                            CONTACT_TEAM_ADMIN_TEXT,
+                            WorkspaceAction::ShowSettingsPage(SettingsSection::Teams),
+                        ));
+                    }
+                } else if let Some(team) = current_team {
+                    text_fragments.push(FormattedTextFragment::plain_text("  "));
+                    if team.billing_metadata.can_upgrade_to_higher_tier_plan() {
                         let upgrade_url = UserWorkspaces::upgrade_link_for_team(team.uid);
                         let upgrade_text = if !has_admin_permissions {
                             COMPARE_PLANS_TEXT
@@ -379,6 +385,7 @@ impl PromptAlertView {
                         ));
                     }
                 } else {
+                    text_fragments.push(FormattedTextFragment::plain_text("  "));
                     let user_id = auth_state.user_id().unwrap_or_default();
                     let upgrade_url = UserWorkspaces::upgrade_link(user_id);
                     let label =
@@ -393,7 +400,9 @@ impl PromptAlertView {
                         };
                     text_fragments.push(FormattedTextFragment::hyperlink(label, upgrade_url));
                 }
-                if !is_enterprise_team && UserWorkspaces::as_ref(app).is_byo_api_key_enabled(app) {
+                if !is_enterprise_workspace
+                    && UserWorkspaces::as_ref(app).is_byo_api_key_enabled(app)
+                {
                     text_fragments.push(FormattedTextFragment::plain_text(" or "));
                     text_fragments.push(FormattedTextFragment::hyperlink_action(
                         "use your own API keys",
