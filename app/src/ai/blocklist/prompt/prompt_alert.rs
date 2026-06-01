@@ -38,7 +38,8 @@ const UPGRADE_TEXT: &str = "Upgrade";
 const COMPARE_PLANS_TEXT: &str = "Compare plans";
 const CONTACT_SUPPORT_TEXT: &str = "Contact support";
 const CONTACT_TEAM_ADMIN_TEXT: &str = "Contact team admin";
-const CONTACT_ACCOUNT_EXECUTIVE_TEXT: &str = "Contact your account executive";
+const CONTACT_ACCOUNT_EXECUTIVE_TEXT: &str = "Contact account executive";
+const CONTACT_ACCOUNT_EXECUTIVE_EMAIL: &str = "mailto:sales@warp.dev";
 const NON_ADMIN_CONTACT_ADMIN_TEXT: &str = ", contact a team admin";
 const NON_ADMIN_ASK_ADMIN_TO_ENABLE_OVERAGES_TEXT: &str = ", ask a team admin to enable overages";
 const NON_ADMIN_ASK_ADMIN_TO_INCREASE_OVERAGES_TEXT: &str =
@@ -374,7 +375,10 @@ impl PromptAlertView {
                     if has_admin_permissions {
                         text_fragments.extend([
                             FormattedTextFragment::plain_text(". "),
-                            FormattedTextFragment::plain_text(CONTACT_ACCOUNT_EXECUTIVE_TEXT),
+                            FormattedTextFragment::hyperlink(
+                                CONTACT_ACCOUNT_EXECUTIVE_TEXT,
+                                CONTACT_ACCOUNT_EXECUTIVE_EMAIL.to_owned(),
+                            ),
                         ]);
                     } else {
                         text_fragments.extend([

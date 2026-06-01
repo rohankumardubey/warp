@@ -95,12 +95,6 @@ fn workspace_action_for_label<'a>(
     })
 }
 
-fn has_plain_label(fragments: &[FormattedTextFragment], label: &str) -> bool {
-    fragments
-        .iter()
-        .any(|fragment| fragment.text == label && fragment.styles.hyperlink.is_none())
-}
-
 #[test]
 fn enterprise_admin_out_of_credits_contacts_account_executive() {
     App::test((), |mut app| async move {
@@ -111,9 +105,8 @@ fn enterprise_admin_out_of_credits_contacts_account_executive() {
 
         assert_eq!(
             fragment_text(&fragments),
-            "  Out of credits. Contact your account executive"
+            "  Out of credits. Contact account executive"
         );
-        assert!(has_plain_label(&fragments, CONTACT_ACCOUNT_EXECUTIVE_TEXT));
     });
 }
 
