@@ -373,3 +373,180 @@ fn aggregated_status_respects_orchestrator_own_in_progress_state() {
         });
     });
 }
+
+// --- QUALITY-780 §7: `WaitingForEvents` aggregation precedence ---
+//
+// Precedence is `InProgress > Blocked > WaitingForEvents > Error > Cancelled
+// > Success`. The cases below pin each boundary so a future refactor can't
+// silently demote `WaitingForEvents` past `Error`/`Cancelled` (or promote it
+// past `Blocked`/`InProgress`). Covers PRODUCT.md (22).
+
+#[test]
+fn aggregated_status_is_waiting_when_orchestrator_yields_and_children_succeeded() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let (terminal_view_id, orchestrator_id, child_a, child_b) =
+            build_orchestrator_with_two_children(&mut app, &history_model);
+
+        // Orchestrator yielded via `wait_for_events`; all children finished
+        // cleanly. The tree is quiescent but not terminal — the aggregator
+        // must report WaitingForEvents so the pill bar reflects that the
+        // run is listening for inbound input.
+        history_model.update(&mut app, |history_model, ctx| {
+            history_model.update_conversation_status(
+                terminal_view_id,
+                orchestrator_id,
+                ConversationStatus::WaitingForEvents,
+                ctx,
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_a,
+                ConversationStatus::Success,
+                ctx,
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_b,
+                ConversationStatus::Success,
+                ctx,
+            );
+        });
+
+        history_model.read(&app, |history_model, _| {
+            assert_eq!(
+                aggregated_orchestrator_status(history_model, orchestrator_id),
+                ConversationStatus::WaitingForEvents,
+            );
+        });
+    });
+}
+
+#[test]
+fn aggregated_status_prefers_in_progress_over_waiting_for_events() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let (terminal_view_id, orchestrator_id, child_a, child_b) =
+            build_orchestrator_with_two_children(&mut app, &history_model);
+
+        // Orchestrator is waiting, but one child is still actively streaming.
+        // `InProgress` outranks `WaitingForEvents` so the user sees the
+        // active state.
+        history_model.update(&mut app, |history_model, ctx| {
+            history_model.update_conversation_status(
+                terminal_view_id,
+                orchestrator_id,
+                ConversationStatus::WaitingForEvents,
+                ctx,
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_a,
+                ConversationStatus::InProgress,
+                ctx,
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_b,
+                ConversationStatus::Success,
+                ctx,
+            );
+        });
+
+        history_model.read(&app, |history_model, _| {
+            assert_eq!(
+                aggregated_orchestrator_status(history_model, orchestrator_id),
+                ConversationStatus::InProgress,
+            );
+        });
+    });
+}
+
+#[test]
+fn aggregated_status_prefers_blocked_over_waiting_for_events() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let (terminal_view_id, orchestrator_id, child_a, child_b) =
+            build_orchestrator_with_two_children(&mut app, &history_model);
+
+        // Orchestrator is waiting for events, but a child is blocked on user
+        // input. Blocked outranks WaitingForEvents because the user needs to
+        // unblock the tree before it can make progress.
+        history_model.update(&mut app, |history_model, ctx| {
+            history_model.update_conversation_status(
+                terminal_view_id,
+                orchestrator_id,
+                ConversationStatus::WaitingForEvents,
+                ctx,
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_a,
+                ConversationStatus::Blocked {
+                    blocked_action: "approve_command".to_string(),
+                },
+                ctx,
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_b,
+                ConversationStatus::Success,
+                ctx,
+            );
+        });
+
+        history_model.read(&app, |history_model, _| {
+            assert_eq!(
+                aggregated_orchestrator_status(history_model, orchestrator_id),
+                ConversationStatus::Blocked {
+                    blocked_action: "approve_command".to_string(),
+                },
+            );
+        });
+    });
+}
+
+#[test]
+fn aggregated_status_prefers_waiting_for_events_over_error() {
+    App::test((), |mut app| async move {
+        initialize_history_persistence_for_tests(&mut app);
+        let history_model = app.add_singleton_model(|_| BlocklistAIHistoryModel::new_for_test());
+        let (terminal_view_id, orchestrator_id, child_a, child_b) =
+            build_orchestrator_with_two_children(&mut app, &history_model);
+
+        // Orchestrator is waiting; one child errored. `WaitingForEvents`
+        // outranks `Error` because the run is not terminal — it may still
+        // resume on its own and the user shouldn't see a terminal
+        // "Error" pill while the driver is still alive.
+        history_model.update(&mut app, |history_model, ctx| {
+            history_model.update_conversation_status(
+                terminal_view_id,
+                orchestrator_id,
+                ConversationStatus::WaitingForEvents,
+                ctx,
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_a,
+                ConversationStatus::Error,
+                ctx,
+            );
+            history_model.update_conversation_status(
+                terminal_view_id,
+                child_b,
+                ConversationStatus::Success,
+                ctx,
+            );
+        });
+
+        history_model.read(&app, |history_model, _| {
+            assert_eq!(
+                aggregated_orchestrator_status(history_model, orchestrator_id),
+                ConversationStatus::WaitingForEvents,
+            );
+        });
+    });
+}
