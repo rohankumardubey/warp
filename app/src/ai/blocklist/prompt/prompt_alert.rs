@@ -249,7 +249,7 @@ impl PromptAlertView {
                 ));
             }
             PromptAlertState::TelemetryDisabledOnFreeTier => {
-                let upgrade_url = if let Some(team) = UserWorkspaces::as_ref(app).current_team() {
+                let upgrade_url = if let Some(team) = current_team {
                     UserWorkspaces::upgrade_link_for_team(team.uid)
                 } else {
                     let user_id = auth_state.user_id().unwrap_or_default();
