@@ -295,7 +295,6 @@ impl PromptAlertView {
                 text_fragments.push(FormattedTextFragment::plain_text(
                     DELINQUENT_DUE_TO_PAYMENT_ISSUE_PRIMARY_TEXT,
                 ));
-                // Check if user is team admin with billing history
                 let has_billing_history = current_team
                     .map(|team| team.has_billing_history)
                     .unwrap_or_default();
