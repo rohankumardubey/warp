@@ -56,9 +56,13 @@ pub fn collect_descendant_conversation_ids_in_spawn_order(
 ///   2. `Blocked` — at least one node is waiting on user input. The
 ///      `blocked_action` from the first blocked node encountered is preserved
 ///      so callers can display it.
-///   3. `Error` — at least one node finished with an error.
-///   4. `Cancelled` — at least one node was cancelled.
-///   5. `Success` — everything finished successfully.
+///   3. `WaitingForEvents` — at least one node yielded via `wait_for_events`
+///      and is listening for inbound input. The run is quiescent but not
+///      terminal — the driver stays alive until something resumes it. See
+///      `specs/QUALITY-780/TECH.md` §7.
+///   4. `Error` — at least one node finished with an error.
+///   5. `Cancelled` — at least one node was cancelled.
+///   6. `Success` — everything finished successfully.
 ///
 /// Returns `Success` if the orchestrator is not loaded and has no descendants.
 pub fn aggregated_orchestrator_status(
@@ -74,19 +78,13 @@ pub fn aggregated_orchestrator_status(
 
     let mut first_blocked: Option<ConversationStatus> = None;
     let mut any_in_progress = false;
+    let mut any_waiting = false;
     let mut any_error = false;
     let mut any_cancelled = false;
-    // TODO(client-pill-bar): track an `any_waiting` accumulator and
-    // promote `WaitingForEvents` ahead of `Error`/`Cancelled` per
-    // QUALITY-780 client TECH §7 precedence
-    // (`InProgress > Blocked > WaitingForEvents > Error > Cancelled > Success`).
-    // For now we co-bucket `WaitingForEvents` with `InProgress` so the
-    // aggregator still reflects an active orchestration tree.
     for status in statuses {
         match status {
-            ConversationStatus::InProgress | ConversationStatus::WaitingForEvents => {
-                any_in_progress = true
-            }
+            ConversationStatus::InProgress => any_in_progress = true,
+            ConversationStatus::WaitingForEvents => any_waiting = true,
             ConversationStatus::Blocked { .. } => {
                 if first_blocked.is_none() {
                     first_blocked = Some(status);
@@ -103,6 +101,9 @@ pub fn aggregated_orchestrator_status(
     }
     if let Some(blocked) = first_blocked {
         return blocked;
+    }
+    if any_waiting {
+        return ConversationStatus::WaitingForEvents;
     }
     if any_error {
         return ConversationStatus::Error;

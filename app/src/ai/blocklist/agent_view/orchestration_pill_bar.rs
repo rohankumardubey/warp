@@ -122,18 +122,19 @@ pub(super) const DONE_STATUS_KEY: u8 = 3;
 
 /// Sort priority within a pill section. Lower sorts leftmost. Cancelled
 /// and Success share one "done" bucket; recency decides their order.
-/// `WaitingForEvents` shares the `InProgress` bucket so yielded runs
-/// stay in the active half of the bar (per QUALITY-780 client TECH §7);
-/// `client-pill-bar` will refine the precedence + sort-key ordering.
+/// `WaitingForEvents` shares the `InProgress` bucket (same sort key) so
+/// yielded pills sort alongside actively-streaming ones in the active
+/// half of the bar, left of the done section (per QUALITY-780 client
+/// TECH §7).
 fn pill_status_sort_key(status: Option<&ConversationStatus>) -> u8 {
     match status {
         Some(ConversationStatus::Blocked { .. }) => 0,
         Some(ConversationStatus::Error) => 1,
-        // TODO(client-pill-bar): give `WaitingForEvents` its own slot if
-        // design wants it visually distinct from `InProgress` within
-        // the active section. For now we co-bucket so yielded pills
-        // sort to the same place as actively-streaming ones.
-        Some(ConversationStatus::InProgress) | Some(ConversationStatus::WaitingForEvents) => 2,
+        Some(ConversationStatus::InProgress) => 2,
+        // `WaitingForEvents` is quiescent but not terminal — keep it in
+        // the active bucket alongside `InProgress` so the pill stays
+        // visible to the user as a run that may resume on its own.
+        Some(ConversationStatus::WaitingForEvents) => 2,
         Some(ConversationStatus::Cancelled) | Some(ConversationStatus::Success) => DONE_STATUS_KEY,
         None => 2,
     }

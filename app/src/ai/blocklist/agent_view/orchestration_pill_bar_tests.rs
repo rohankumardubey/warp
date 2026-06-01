@@ -56,6 +56,18 @@ fn pill_status_sort_key_treats_none_as_in_progress() {
 }
 
 #[test]
+fn pill_status_sort_key_places_waiting_for_events_in_active_bucket() {
+    // Per QUALITY-780 client TECH §7, `WaitingForEvents` shares the
+    // `InProgress` bucket so yielded pills stay in the active section of
+    // the bar, strictly to the left of the done bucket. Covers PRODUCT.md
+    // (24).
+    let waiting_key = pill_status_sort_key(Some(&ConversationStatus::WaitingForEvents));
+    let in_progress_key = pill_status_sort_key(Some(&ConversationStatus::InProgress));
+    assert_eq!(waiting_key, in_progress_key);
+    assert!(waiting_key < DONE_STATUS_KEY);
+}
+
+#[test]
 fn pill_done_recency_key_puts_most_recent_first_and_unknown_last() {
     let older = pill_done_recency_key(Some(1_000));
     let newer = pill_done_recency_key(Some(2_000));
