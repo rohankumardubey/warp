@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet};
+#[cfg(not(target_family = "wasm"))]
 use std::path::Path;
 use std::time::Duration;
 
@@ -110,7 +111,7 @@ use warp_graphql::queries::task_git_credentials::{
 };
 use warp_multi_agent_api::ConversationData;
 
-use super::auth::AuthClient;
+#[cfg(not(target_family = "wasm"))]
 use super::download::write_response_body_to_path;
 use super::harness_support::{UploadField, UploadFieldValue, UploadTarget};
 use super::ServerApi;
@@ -1124,6 +1125,7 @@ pub trait AIClient: 'static + Send + Sync {
         task_id: &AmbientAgentTaskId,
     ) -> anyhow::Result<serde_json::Value, anyhow::Error>;
 
+    #[cfg(not(target_family = "wasm"))]
     async fn download_run_transcript_to_path(
         &self,
         run_id: &AmbientAgentTaskId,
@@ -2482,6 +2484,7 @@ impl AIClient for ServerApi {
             .collect())
     }
 
+    #[cfg(not(target_family = "wasm"))]
     async fn download_run_transcript_to_path(
         &self,
         run_id: &AmbientAgentTaskId,
