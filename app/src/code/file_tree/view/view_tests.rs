@@ -114,6 +114,90 @@ fn build_repo_state_with_unloaded_directory(repo_root: &std::path::Path) -> File
 }
 
 #[test]
+fn directory_context_menu_includes_new_directory_action() {
+    VirtualFS::test("file_tree_new_directory_context_menu", |dirs, mut vfs| {
+        vfs.mkdir("repo/src");
+        let repo_root = dirs.tests().join("repo");
+
+        App::test((), |mut app| async move {
+            let _ = initialize_app(&mut app);
+            let (_, file_tree_view) = app.add_window(WindowStyle::NotStealFocus, FileTreeView::new);
+
+            file_tree_view.update(&mut app, |view, ctx| {
+                view.set_is_active(true, ctx);
+                view.set_root_directories(vec![repo_root.clone()], ctx);
+            });
+
+            file_tree_view.read(&app, |view, _ctx| {
+                let root = std_path(&repo_root);
+                let id = super::FileTreeIdentifier {
+                    root: root.clone(),
+                    index: 0,
+                };
+                let root_dir = view.root_directories.get(&root).unwrap();
+                let item = root_dir.items.get(id.index).unwrap();
+                let menu_items = view.context_menu_items(item, &id);
+                let menu_debug = format!("{menu_items:?}");
+
+                assert!(menu_debug.contains("Text(\"New file\")"));
+                assert!(menu_debug.contains("Text(\"New directory\")"));
+                assert!(menu_items.iter().any(|item| matches!(
+                    item.item_on_select_action(),
+                    Some(super::FileTreeAction::NewDirectoryBelowDirectory { .. })
+                )));
+            });
+        });
+    });
+}
+
+#[test]
+fn new_directory_action_creates_directory_and_updates_tree() {
+    VirtualFS::test("file_tree_new_directory_action", |dirs, mut vfs| {
+        vfs.mkdir("repo");
+        let repo_root = dirs.tests().join("repo");
+        let new_directory = repo_root.join("components");
+
+        App::test((), |mut app| async move {
+            let _ = initialize_app(&mut app);
+            let (_, file_tree_view) = app.add_window(WindowStyle::NotStealFocus, FileTreeView::new);
+
+            file_tree_view.update(&mut app, |view, ctx| {
+                view.set_is_active(true, ctx);
+                view.set_root_directories(vec![repo_root.clone()], ctx);
+            });
+
+            file_tree_view.update(&mut app, |view, ctx| {
+                let id = super::FileTreeIdentifier {
+                    root: std_path(&repo_root),
+                    index: 0,
+                };
+                view.create_new_directory(&id, ctx);
+                view.editor_view.update(ctx, |editor, ctx| {
+                    editor.set_buffer_text("components", ctx);
+                });
+                view.commit_pending_edit(ctx);
+            });
+
+            assert!(new_directory.is_dir());
+            file_tree_view.read(&app, |view, _ctx| {
+                let root = std_path(&repo_root);
+                let new_directory =
+                    warp_util::standardized_path::StandardizedPath::from_local_canonicalized(
+                        &new_directory,
+                    )
+                    .unwrap();
+                let root_dir = view.root_directories.get(&root).unwrap();
+
+                assert!(root_dir.entry.contains(&new_directory));
+                assert!(root_dir
+                    .items
+                    .iter()
+                    .any(|item| item.path() == &new_directory));
+            });
+        });
+    });
+}
+#[test]
 fn repo_transition_unregisters_lazy_loaded_path() {
     VirtualFS::test("file_tree_repo_transition", |dirs, mut vfs| {
         vfs.mkdir("repo/.git/objects")
