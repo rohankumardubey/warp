@@ -15,6 +15,7 @@ use crate::{RepoMetadataError, Repository};
 
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
+        use ignore::gitignore::Gitignore;
         use watcher::{BulkFilesystemWatcher, BulkFilesystemWatcherEvent};
         use crate::entry::{
             extract_worktree_git_dir, is_commit_related_git_file, is_git_internal_path,
@@ -290,15 +291,20 @@ impl DirectoryWatcher {
     /// Starts watching multiple directories for filesystem changes.
     ///
     /// The returned future resolves once all directories are registered.
+    /// `gitignores` are used to prune the inotify directory walk so that
+    /// large ignored subtrees (node_modules, target/, etc.) don't create
+    /// watches.
     #[cfg(feature = "local_fs")]
     pub(crate) fn start_watching_directories(
         &mut self,
         directory_paths: Vec<StandardizedPath>,
+        gitignores: Vec<Gitignore>,
         ctx: &mut ModelContext<Self>,
     ) -> impl Future<Output = Result<(), RepoMetadataError>> {
+        let shared_gitignores = std::sync::Arc::new(gitignores);
         let futures: Vec<_> = directory_paths
             .into_iter()
-            .map(|path| self.start_watching_directory(&path, ctx))
+            .map(|path| self.start_watching_directory(&path, shared_gitignores.clone(), ctx))
             .collect();
 
         async move {
@@ -312,10 +318,13 @@ impl DirectoryWatcher {
     ///
     /// The returned future resolves once the directory is registered. Filesystem changes before
     /// this may not be observed.
+    /// `gitignores` are used to prune the inotify directory walk so that
+    /// large ignored subtrees don't create watches.
     #[cfg(feature = "local_fs")]
     pub(crate) fn start_watching_directory(
         &mut self,
         directory_path: &StandardizedPath,
+        gitignores: std::sync::Arc<Vec<Gitignore>>,
         ctx: &mut ModelContext<Self>,
     ) -> impl Future<Output = Result<(), RepoMetadataError>> {
         let local_path = directory_path.to_local_path();
@@ -324,11 +333,11 @@ impl DirectoryWatcher {
                 watcher.update(ctx, |watcher, _ctx| {
                     use notify_debouncer_full::notify::RecursiveMode;
 
-                    use crate::entry::repo_watch_filter;
+                    use crate::entry::repo_watch_filter_with_gitignores;
 
                     Some(watcher.register_path(
                         &local_path,
-                        repo_watch_filter(),
+                        repo_watch_filter_with_gitignores(gitignores),
                         RecursiveMode::Recursive,
                     ))
                 })

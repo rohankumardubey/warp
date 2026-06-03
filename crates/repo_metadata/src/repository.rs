@@ -328,9 +328,10 @@ impl Repository {
         let registration_future: BoxFuture<'static, Result<(), RepoMetadataError>> =
             if should_start_watching {
                 let directories_to_watch = self.watch_paths();
+                let gitignores = self.gitignores.clone();
 
                 Box::pin(DirectoryWatcher::handle(ctx).update(ctx, |watcher, ctx| {
-                    watcher.start_watching_directories(directories_to_watch, ctx)
+                    watcher.start_watching_directories(directories_to_watch, gitignores, ctx)
                 }))
             } else {
                 Box::pin(ready(Ok(())))
