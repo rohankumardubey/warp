@@ -392,17 +392,15 @@ impl ApiKeyManager {
             .flatten()
             .unwrap_or_default();
 
-        // The connected Grok subscription's OAuth access token, gated on the same
-        // BYO-enable path as the user-pasted keys above. Only sent while it's
-        // present and not (near-)expired; the app layer refreshes it proactively.
-        let grok_oauth_access_token = include_byo_keys
-            .then(|| {
-                self.grok_tokens
-                    .as_ref()
-                    .and_then(GrokTokens::valid_access_token)
-                    .map(str::to_owned)
-            })
-            .flatten()
+        // The connected Grok subscription's OAuth access token is independent
+        // from the user-pasted BYO API-key setting above. Once the user has
+        // explicitly connected their Grok subscription via OAuth, send a valid
+        // token so the server can authenticate xAI requests with it.
+        let grok_oauth_access_token = self
+            .grok_tokens
+            .as_ref()
+            .and_then(GrokTokens::valid_access_token)
+            .map(str::to_owned)
             .unwrap_or_default();
 
         // Also include credentials when running with OIDC-managed Bedrock inference, regardless

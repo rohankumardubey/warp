@@ -61,3 +61,33 @@ fn token_response_parses_minimal_and_full() {
     assert_eq!(full.expires_in, Some(3600));
     assert_eq!(full.scope.as_deref(), Some("api:access"));
 }
+
+#[test]
+fn request_header_extracts_origin_case_insensitively() {
+    let request = "GET /callback?code=c&state=s HTTP/1.1\r\n\
+                   Host: 127.0.0.1:56121\r\n\
+                   origin: https://accounts.x.ai\r\n\
+                   \r\n";
+
+    assert_eq!(
+        request_header(request, "Origin").as_deref(),
+        Some("https://accounts.x.ai")
+    );
+}
+
+#[test]
+fn cors_headers_allow_xai_origins_for_loopback_callback() {
+    let headers = cors_headers(Some("https://accounts.x.ai"));
+
+    assert!(headers.contains("Access-Control-Allow-Origin: https://accounts.x.ai"));
+    assert!(headers.contains("Access-Control-Allow-Methods: GET, OPTIONS"));
+    assert!(headers.contains("Access-Control-Allow-Headers: Content-Type"));
+    assert!(headers.contains("Access-Control-Allow-Private-Network: true"));
+    assert!(headers.contains("Vary: Origin"));
+}
+
+#[test]
+fn cors_headers_reject_unknown_origins() {
+    assert!(cors_headers(Some("https://example.com")).is_empty());
+    assert!(cors_headers(None).is_empty());
+}

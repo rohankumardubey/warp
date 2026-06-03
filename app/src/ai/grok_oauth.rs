@@ -49,6 +49,12 @@ const CALLBACK_TIMEOUT: Duration = Duration::from_secs(300);
 /// How long to nap between non-blocking `accept()` attempts.
 const POLL_INTERVAL: Duration = Duration::from_millis(100);
 
+/// xAI's browser consent screen fetches the loopback callback from these
+/// origins. Since that request crosses origins (https://accounts.x.ai ->
+/// http://127.0.0.1), browsers require CORS and Private Network Access headers
+/// before the page can observe the callback response.
+const CORS_ALLOWED_ORIGINS: [&str; 2] = ["https://accounts.x.ai", "https://auth.x.ai"];
+
 fn redirect_uri() -> String {
     format!("http://{REDIRECT_HOST}:{REDIRECT_PORT}/callback")
 }
@@ -224,18 +230,32 @@ fn handle_callback_connection(mut stream: TcpStream) -> anyhow::Result<Option<Ca
         .context("failed to read the Grok OAuth callback request")?;
     let request = String::from_utf8_lossy(&buf[..n]);
 
+    let origin = request_header(&request, "Origin");
+
     // The request line looks like: "GET /callback?code=...&state=... HTTP/1.1".
-    let path = request
+    let mut request_line_parts = request
         .lines()
         .next()
-        .and_then(|line| line.split_whitespace().nth(1))
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .split_whitespace();
+    let method = request_line_parts.next().unwrap_or_default();
+    let path = request_line_parts.next().unwrap_or_default();
+
+    if method == "OPTIONS" && path.starts_with("/callback") {
+        write_response(&mut stream, "204 No Content", "", origin.as_deref());
+        return Ok(None);
+    }
 
     let Some(query) = path
         .strip_prefix("/callback")
         .and_then(|rest| rest.strip_prefix('?'))
     else {
-        write_response(&mut stream, "404 Not Found", "Not found.");
+        write_response(
+            &mut stream,
+            "404 Not Found",
+            "Not found.",
+            origin.as_deref(),
+        );
         return Ok(None);
     };
 
@@ -255,30 +275,62 @@ fn handle_callback_connection(mut stream: TcpStream) -> anyhow::Result<Option<Ca
     }
 
     if let Some(error) = error {
-        write_response(&mut stream, "400 Bad Request", FAILURE_HTML);
+        write_response(
+            &mut stream,
+            "400 Bad Request",
+            FAILURE_HTML,
+            origin.as_deref(),
+        );
         let detail = error_description.unwrap_or(error);
         bail!("Grok authorization was denied or failed: {detail}");
     }
 
     let (Some(code), Some(state)) = (code, state) else {
-        write_response(&mut stream, "400 Bad Request", FAILURE_HTML);
+        write_response(
+            &mut stream,
+            "400 Bad Request",
+            FAILURE_HTML,
+            origin.as_deref(),
+        );
         bail!("the Grok authorization callback was missing the code or state parameter");
     };
-
-    write_response(&mut stream, "200 OK", SUCCESS_HTML);
+    write_response(&mut stream, "200 OK", SUCCESS_HTML, origin.as_deref());
     Ok(Some(CallbackData { code, state }))
+}
+fn request_header(request: &str, header_name: &str) -> Option<String> {
+    request.lines().skip(1).find_map(|line| {
+        let (name, value) = line.split_once(':')?;
+        name.eq_ignore_ascii_case(header_name)
+            .then(|| value.trim().to_owned())
+    })
 }
 
 /// Writes a minimal HTTP/1.1 response and closes the connection.
-fn write_response(stream: &mut TcpStream, status: &str, body: &str) {
+fn write_response(stream: &mut TcpStream, status: &str, body: &str, origin: Option<&str>) {
+    let cors_headers = cors_headers(origin);
     let response = format!(
         "HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\n\
-         Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
+         {cors_headers}Content-Length: {}\r\nConnection: close\r\n\r\n{body}",
         body.len()
     );
     let _ = stream.write_all(response.as_bytes());
     let _ = stream.flush();
     let _ = stream.shutdown(Shutdown::Both);
+}
+
+fn cors_headers(origin: Option<&str>) -> String {
+    origin
+        .filter(|origin| CORS_ALLOWED_ORIGINS.contains(origin))
+        .map(|origin| {
+            format!(
+                "Access-Control-Allow-Origin: {origin}\r\n\
+                 Access-Control-Allow-Methods: GET, OPTIONS\r\n\
+                 Access-Control-Allow-Headers: Content-Type\r\n\
+                 Access-Control-Allow-Private-Network: true\r\n\
+                 Vary: Origin\r\n"
+            )
+        })
+        .unwrap_or_default()
 }
 
 /// Exchanges the authorization code for OAuth tokens at xAI's token endpoint.

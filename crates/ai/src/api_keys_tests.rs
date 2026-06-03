@@ -406,12 +406,15 @@ fn api_keys_for_request_includes_grok_token() {
 }
 
 #[test]
-fn api_keys_for_request_omits_grok_token_when_byo_disabled() {
+fn api_keys_for_request_includes_grok_token_when_byo_disabled() {
     let mgr = make_manager_with_grok(
         ApiKeys::default(),
         Some(grok_tokens("grok-abc", Some(3600))),
     );
-    assert!(mgr.api_keys_for_request(false, false).is_none());
+    let result = mgr.api_keys_for_request(false, false).unwrap();
+    assert_eq!(result.grok_oauth_access_token, "grok-abc");
+    assert!(result.openai.is_empty());
+    assert!(result.anthropic.is_empty());
 }
 
 #[test]

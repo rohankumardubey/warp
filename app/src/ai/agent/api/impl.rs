@@ -93,7 +93,7 @@ pub async fn generate_multi_agent_output(
             supports_suggest_prompt: true,
             supports_read_image_files: FeatureFlag::ReadImageFiles.is_enabled(),
             supports_reasoning_message: true,
-            api_keys,
+            api_keys: dbg!(api_keys),
             autonomy_level: params.autonomy_level.into(),
             isolation_level: params.isolation_level.into(),
             web_search_enabled: params.web_search_enabled,
