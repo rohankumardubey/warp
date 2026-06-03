@@ -722,6 +722,44 @@ pub fn repo_watch_filter() -> WatchFilter {
     )
 }
 
+/// Returns a [`WatchFilter`] that additionally skips directories matching the
+/// supplied gitignore rules.
+///
+/// On Linux the `notify` crate registers one inotify watch per directory.
+/// Without gitignore filtering, a large repository (e.g. one containing a deep
+/// `node_modules/` tree) can accumulate hundreds of thousands of watches and
+/// consume 10+ GB of memory. By pruning gitignored directories from the
+/// recursive walk we avoid creating watches for subtrees that are not
+/// interesting to the repo-metadata or file-tree systems.
+#[cfg(feature = "local_fs")]
+pub fn repo_watch_filter_with_gitignores(gitignores: Arc<Vec<Gitignore>>) -> WatchFilter {
+    let descend_gitignores = gitignores.clone();
+    WatchFilter::with_filter(
+        Arc::new(move |path: &Path| {
+            // Always apply the git-internal-path pruning.
+            if !should_watch_directory_in_git_path(path) {
+                return false;
+            }
+            // Skip directories that are gitignored. Directories are the only
+            // entries the descend predicate is called on, so `is_dir = true`.
+            !matches_gitignores(path, true, descend_gitignores.as_slice(), true)
+        }),
+        Arc::new(move |path: &Path| {
+            if should_ignore_git_path(path) {
+                return false;
+            }
+            // Also suppress events from gitignored paths so the watcher
+            // doesn't emit spurious updates for ignored files.
+            !matches_gitignores(
+                path,
+                path.is_dir(),
+                gitignores.as_slice(),
+                true, /* check_ancestors */
+            )
+        }),
+    )
+}
+
 /// Determines whether a file should be parsed by a treesitter query. For now the main criteria is it shouldn't
 /// exceed the given file size limit.
 pub fn is_file_parsable(path: &Path) -> Result<bool, io::Error> {

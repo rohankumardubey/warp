@@ -322,15 +322,27 @@ impl DirectoryWatcher {
         let registration_future = if let Some(ref watcher) = self.watcher {
             if let Some(local_path) = local_path.clone() {
                 watcher.update(ctx, |watcher, _ctx| {
+                    use std::sync::Arc;
+
                     use notify_debouncer_full::notify::RecursiveMode;
 
-                    use crate::entry::repo_watch_filter;
+                    use crate::entry::{
+                        gitignores_for_directory, repo_watch_filter,
+                        repo_watch_filter_with_gitignores,
+                    };
 
-                    Some(watcher.register_path(
-                        &local_path,
-                        repo_watch_filter(),
-                        RecursiveMode::Recursive,
-                    ))
+                    // Load gitignore rules for this directory so the descend
+                    // predicate can prune ignored subtrees (e.g. node_modules/).
+                    // This prevents the inotify backend from creating watches
+                    // for hundreds of thousands of ignored directories.
+                    let gitignores = gitignores_for_directory(&local_path);
+                    let watch_filter = if gitignores.is_empty() {
+                        repo_watch_filter()
+                    } else {
+                        repo_watch_filter_with_gitignores(Arc::new(gitignores))
+                    };
+
+                    Some(watcher.register_path(&local_path, watch_filter, RecursiveMode::Recursive))
                 })
             } else {
                 log::warn!("Cannot watch non-local path: {directory_path}");

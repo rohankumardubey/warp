@@ -29,7 +29,7 @@ use crate::{gitignores_for_directory, matches_gitignores, RepoMetadataError};
 cfg_if::cfg_if! {
     if #[cfg(feature = "local_fs")] {
         use notify_debouncer_full::notify::RecursiveMode;
-        use crate::entry::repo_watch_filter;
+        use crate::entry::{repo_watch_filter, repo_watch_filter_with_gitignores};
         use crate::repositories::{DetectedRepositories, DetectedRepositoriesEvent};
         use watcher::{BulkFilesystemWatcher, BulkFilesystemWatcherEvent};
         use warpui_core::SingletonEntity as _;
@@ -427,14 +427,22 @@ impl LocalRepoMetadataModel {
         }
 
         // Register this path with the watcher if we have one.
+        // When gitignore rules are available, use them to prune the recursive
+        // walk so we don't create inotify watches for ignored directories
+        // (e.g. node_modules/, target/) which can consume 10+ GB on Linux.
         #[cfg(feature = "local_fs")]
         {
             if let Some(ref watcher) = self.watcher {
                 let watch_path = local_path.clone();
+                let watch_filter = if state.gitignores.is_empty() {
+                    repo_watch_filter()
+                } else {
+                    repo_watch_filter_with_gitignores(Arc::new(state.gitignores.clone()))
+                };
                 watcher.update(ctx, |watcher, _ctx| {
                     std::mem::drop(watcher.register_path(
                         &watch_path,
-                        repo_watch_filter(),
+                        watch_filter,
                         RecursiveMode::Recursive,
                     ));
                 });
