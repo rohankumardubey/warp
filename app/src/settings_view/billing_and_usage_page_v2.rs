@@ -769,13 +769,21 @@ impl BillingAndUsagePageV2View {
 
         let has_base_credits = ai_model.request_limit() > 0;
 
+        // At-cost transparent pricing: the dollar allowance is the charged unit,
+        // so surface it as the headline of the Balance section. The credit cards
+        // below remain as a shadow/legacy view during the migration.
+        let allowance_cents = ai_model.allowance_cents();
+        let remaining_cents = ai_model.remaining_cents();
+        let used_cents = ai_model.used_cents();
+        let has_dollar_allowance = allowance_cents > 0;
+
         let grants = ai_model.bonus_grants();
         let workspace_uid = UserWorkspaces::as_ref(app)
             .current_workspace()
             .map(|ws| ws.uid);
         let classified = ClassifiedGrants::new(grants, workspace_uid);
 
-        if !has_base_credits && !classified.has_any() {
+        if !has_base_credits && !classified.has_any() && !has_dollar_allowance {
             return None;
         }
 
@@ -843,26 +851,66 @@ impl BillingAndUsagePageV2View {
             );
         }
 
-        Some(
-            Flex::column()
-                .with_child(
-                    Container::new(
-                        Text::new_inline("Balance", appearance.ui_font_family(), HEADER_FONT_SIZE)
-                            .with_style(Properties::default().weight(Weight::Bold))
-                            .with_color(theme.active_ui_text_color().into())
-                            .finish(),
-                    )
-                    .with_margin_bottom(12.)
+        let mut column = Flex::column();
+        column.add_child(
+            Container::new(
+                Text::new_inline("Balance", appearance.ui_font_family(), HEADER_FONT_SIZE)
+                    .with_style(Properties::default().weight(Weight::Bold))
+                    .with_color(theme.active_ui_text_color().into())
                     .finish(),
-                )
-                .with_child(cards_row.finish())
-                .with_child(
-                    ConstrainedBox::new(Empty::new().finish())
-                        .with_height(24.)
+            )
+            .with_margin_bottom(12.)
+            .finish(),
+        );
+
+        if has_dollar_allowance {
+            let format_dollars = |cents: i64| {
+                let dollars = cents / 100;
+                let rem = (cents.abs() % 100) as u8;
+                format!("${}.{rem:02}", dollars.separate_with_commas())
+            };
+            let detail = format!(
+                "{} used · {}",
+                format_dollars(used_cents),
+                ai_model
+                    .next_refresh_time_local()
+                    .format("Resets %b %d at %-I:%M %p")
+            );
+            let summary = format!(
+                "{} of {} spend allowance remaining",
+                format_dollars(remaining_cents),
+                format_dollars(allowance_cents),
+            );
+            column.add_child(
+                Container::new(
+                    Flex::column()
+                        .with_cross_axis_alignment(CrossAxisAlignment::Start)
+                        .with_spacing(2.)
+                        .with_child(
+                            Text::new_inline(summary, appearance.ui_font_family(), 14.)
+                                .with_style(Properties::default().weight(Weight::Semibold))
+                                .with_color(theme.active_ui_text_color().into())
+                                .finish(),
+                        )
+                        .with_child(
+                            Text::new_inline(detail, appearance.ui_font_family(), 12.)
+                                .with_color(blended_colors::text_sub(theme, theme.background()))
+                                .finish(),
+                        )
                         .finish(),
                 )
+                .with_margin_bottom(12.)
                 .finish(),
-        )
+            );
+        }
+
+        column.add_child(cards_row.finish());
+        column.add_child(
+            ConstrainedBox::new(Empty::new().finish())
+                .with_height(24.)
+                .finish(),
+        );
+        Some(column.finish())
     }
 
     fn render_ambient_agent_trial_widget(

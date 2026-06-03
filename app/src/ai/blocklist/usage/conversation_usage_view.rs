@@ -1,6 +1,7 @@
 use std::cmp::Ordering;
 use std::collections::HashMap;
 
+use thousands::Separable;
 use warp_core::ui::theme::color::internal_colors;
 use warp_core::ui::Icon;
 use warpui::elements::{
@@ -42,6 +43,15 @@ pub struct ConversationUsageInfo {
     // Credits spent over the last block, where the block comprises
     // all agent outputs since the most recent user input.
     pub credits_spent_for_last_block: Option<f32>,
+    /// Exact at-cost inference cost so far, in USD cents (may be fractional).
+    /// `None` when the server has not reported a transparent at-cost value.
+    pub cost_cents: Option<f64>,
+    /// Exact transparent platform fee so far, in USD cents.
+    pub platform_fee_cents: Option<f64>,
+    pub total_input_tokens: u64,
+    pub total_output_tokens: u64,
+    pub total_cache_read_tokens: u64,
+    pub total_cache_write_tokens: u64,
     pub tool_calls: i32,
     pub models: Vec<ModelTokenUsage>,
     pub context_window_usage: f32,
@@ -49,6 +59,18 @@ pub struct ConversationUsageInfo {
     pub lines_added: i32,
     pub lines_removed: i32,
     pub commands_executed: i32,
+}
+
+/// Formats an at-cost amount given in USD cents as a dollar string. Uses four
+/// decimal places for sub-cent per-turn amounts so fractional costs stay
+/// visible, and two places otherwise.
+fn format_cents_as_dollars(cents: f64) -> String {
+    let dollars = cents / 100.0;
+    if dollars != 0.0 && dollars.abs() < 0.01 {
+        format!("${dollars:.4}")
+    } else {
+        format!("${dollars:.2}")
+    }
 }
 
 /// Timing information for the last set of agent responses
@@ -337,6 +359,40 @@ impl ConversationUsageView {
         // label/value layout as the rest of the usage summary; the
         // existing flex spacing handles indentation.
         self.append_per_agent_rows(&mut labels, &mut values, rollup.as_ref(), appearance);
+
+        // At-cost transparent pricing: show the exact dollar cost (inference and
+        // the separate platform fee as distinct lines) plus token totals when
+        // the server reports them. Conversations predating transparent pricing
+        // report neither, so this falls back silently to the credits-only view.
+        if let Some(inference_cents) = self.usage_info.cost_cents {
+            labels.push(render_label_text("Inference cost", appearance));
+            values.push(render_value_text(
+                format_cents_as_dollars(inference_cents),
+                appearance,
+            ));
+        }
+        if let Some(platform_fee_cents) = self.usage_info.platform_fee_cents {
+            labels.push(render_label_text("Platform fee", appearance));
+            values.push(render_value_text(
+                format_cents_as_dollars(platform_fee_cents),
+                appearance,
+            ));
+        }
+
+        for (label, tokens) in [
+            ("Input tokens", self.usage_info.total_input_tokens),
+            ("Output tokens", self.usage_info.total_output_tokens),
+            ("Cache read tokens", self.usage_info.total_cache_read_tokens),
+            (
+                "Cache write tokens",
+                self.usage_info.total_cache_write_tokens,
+            ),
+        ] {
+            if tokens > 0 {
+                labels.push(render_label_text(label, appearance));
+                values.push(render_value_text(tokens.separate_with_commas(), appearance));
+            }
+        }
 
         labels.push(render_label_text("Tool calls", appearance));
         values.push(render_value_text(
