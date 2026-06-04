@@ -20,7 +20,7 @@ use crate::code::editor::line::EditorLineLocation;
 use crate::features::FeatureFlag;
 
 fn current_line_location(line_number: usize) -> EditorLineLocation {
-    let line_number = LineCount::from(line_number);
+    let line_number = LineCount::from(line_number.saturating_sub(1));
     EditorLineLocation::Current {
         line_number,
         line_range: line_number..line_number + LineCount::from(1),
@@ -37,7 +37,7 @@ impl CodeEditorView {
             .as_ref(app)
             .pending_comment
         {
-            PendingComment::Open { line } => line.line_number().map(|lc| lc.as_u32() as usize),
+            PendingComment::Open { line } => line.line_number().map(|lc| lc.as_u32() as usize + 1),
             PendingComment::Closed => None,
         }
     }
@@ -121,7 +121,9 @@ impl CodeEditorView {
             .as_ref(app)
             .render_state()
             .as_ref(app)
-            .vertical_offset_at_render_location(RenderLineLocation::Current(LineCount::from(line)))
+            .vertical_offset_at_render_location(RenderLineLocation::Current(LineCount::from(
+                line.saturating_sub(1),
+            )))
             .map(|p| p.as_f32())
     }
 
@@ -349,7 +351,7 @@ impl CodeEditorView {
         width: f32,
         ctx: &mut ViewContext<Self>,
     ) -> bool {
-        let target = LineCount::from(line);
+        let target = LineCount::from(line.saturating_sub(1));
         let Some(handle) = self
             .inline_comments
             .values()

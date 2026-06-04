@@ -1189,7 +1189,10 @@ impl CodeEditorView {
                 self.window_id,
                 size,
             ));
-            blocks.push(CommentBlock::new(line.into_render_line_location(), item));
+            blocks.push(CommentBlock::new(
+                line.into_inline_comment_render_line_location(),
+                item,
+            ));
         }
 
         // The active composer (above any card on its line, which is skipped above).
@@ -1201,7 +1204,10 @@ impl CodeEditorView {
                 self.window_id,
                 size,
             ));
-            blocks.push(CommentBlock::new(line.into_render_line_location(), item));
+            blocks.push(CommentBlock::new(
+                line.into_inline_comment_render_line_location(),
+                item,
+            ));
         }
 
         self.model.update(ctx, |model, ctx| {
@@ -1819,7 +1825,7 @@ impl CodeEditorView {
         line: &EditorLineLocation,
         ctx: &AppContext,
     ) -> Option<(Pixels, Pixels)> {
-        let render_location = line.clone().into_render_line_location();
+        let render_location = line.clone().into_inline_comment_render_line_location();
         self.model
             .as_ref(ctx)
             .render_state()
@@ -2009,9 +2015,7 @@ impl CodeEditorView {
                     first_replace = if first_replace.is_uppercase() {
                         first_replace
                     } else {
-                        {
-                            first_replace.to_uppercase().next().unwrap_or(first_replace)
-                        }
+                        first_replace.to_uppercase().next().unwrap_or(first_replace)
                     };
                     result.push(first_replace);
                     result.push_str(&replace_chars.collect::<String>().to_lowercase());

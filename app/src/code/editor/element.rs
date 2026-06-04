@@ -51,6 +51,13 @@ fn highlight_element(appearance: &Appearance) -> Box<dyn Element> {
         .with_border(Border::all(2.).with_border_fill(border_color))
         .finish()
 }
+fn should_hide_comment_gutter_icons(
+    has_attached_comment: bool,
+    has_open_comment_box: bool,
+) -> bool {
+    (has_attached_comment || has_open_comment_box)
+        && FeatureFlag::EmbeddedCodeReviewComments.is_enabled()
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ChangeType {
@@ -410,8 +417,9 @@ pub struct EditorWrapper<V: EditorView> {
     comment_button: Option<CommentButton>,
     // Todo: kc combine all comment related fields into a struct.
     comment_box: Option<CommentBox>,
-    /// Lines with saved comments attached. These lines always have an
-    /// indicator in the gutter element.
+    /// Lines with saved comments attached. These lines have an indicator in the gutter element
+    /// unless embedded inline comments are enabled, in which case the inline card replaces the
+    /// redundant gutter indicator.
     saved_comments: Vec<SavedComment>,
     gutter_element_hover_target: GutterHoverTarget,
     expand_diff_indicator_width_on_hover: bool,
@@ -469,14 +477,20 @@ impl<V: EditorView> EditorWrapper<V> {
                 continue;
             }
 
-            let Some(overlay) = element.overlay else {
-                flush(&mut group);
-                continue;
-            };
-
             let current_range = element.line.line_range().clone();
             let start_y = element.offset.as_f32();
             let end_y = start_y + element.height;
+
+            let Some(overlay) = element.overlay else {
+                if let Some(group) = &mut group {
+                    if group.line_range == current_range {
+                        group.end_y = end_y;
+                        continue;
+                    }
+                }
+                flush(&mut group);
+                continue;
+            };
 
             match &mut group {
                 Some(group) if group.line_range == current_range && group.overlay == overlay => {
@@ -569,6 +583,36 @@ impl<V: EditorView> EditorWrapper<V> {
             .iter()
             .find(|comment| comment.location().is_same_line(line))
             .cloned()
+    }
+
+    fn extend_decoration_end_for_inline_comment(
+        &self,
+        decoration_start_y: Pixels,
+        decoration_end_y: Pixels,
+        extended_end_y: &mut Pixels,
+        line: &EditorLineLocation,
+        model: &RenderState,
+    ) {
+        let Some(position) =
+            model.comment_block_position(line.clone().into_inline_comment_render_line_location())
+        else {
+            return;
+        };
+
+        // Inline comment blocks are inserted immediately after their anchor line, so a block that
+        // belongs to this decoration starts at the decoration's current bottom edge. Allow a small
+        // tolerance for float-to-pixel conversions and for zero-height intermediate items.
+        let position_start = position.start_y_offset.as_f32();
+        let decoration_start = decoration_start_y.as_f32();
+        let decoration_end = decoration_end_y.as_f32();
+        if position_start + 0.5 < decoration_start || position_start - 0.5 > decoration_end {
+            return;
+        }
+
+        let block_end = position.start_y_offset + position.content_height;
+        if block_end > *extended_end_y {
+            *extended_end_y = block_end;
+        }
     }
 
     fn should_display_relative_line_number(&self) -> bool {
@@ -806,6 +850,52 @@ impl<V: EditorView> EditorWrapper<V> {
 
                 elements.append(&mut new_gutter_elements);
 
+                continue;
+            }
+            if block.is_embedded_comment() {
+                let height = block.viewport_item().content_size.y();
+                let diff_range = if is_removal {
+                    self.diff_status.removed_diff_range(line_count)
+                } else {
+                    self.diff_status.added_diff_range(line_count)
+                };
+                let line = EditorLineLocation::Current {
+                    line_number: line_count,
+                    line_range: diff_range.unwrap_or(line_count..line_count + 1),
+                };
+                let range_hovered = hovered_range
+                    .as_ref()
+                    .is_some_and(|hovered_line| hovered_line.line_range() == line.line_range());
+                let element = self.render_gutter_element(
+                    None,
+                    line_number_config,
+                    false,
+                    false,
+                    false,
+                    None,
+                    height,
+                    height,
+                    &line,
+                    block.overlay_decoration(),
+                    true,
+                    appearance,
+                );
+                elements.push(GutterElement {
+                    element,
+                    height,
+                    offset,
+                    hovered: range_hovered,
+                    line,
+                    element_type: GutterElementType::DiffHunk {
+                        hunk: diff_hunk,
+                        change_type: if is_removal {
+                            ChangeType::Remove
+                        } else {
+                            ChangeType::Add
+                        },
+                    },
+                    overlay: block.overlay_decoration(),
+                });
                 continue;
             }
             let diff_range = self.diff_status.added_diff_range(line_count);
@@ -1190,12 +1280,23 @@ impl<V: EditorView> EditorWrapper<V> {
         let show_revert_diff_hunk =
             FeatureFlag::RevertDiffHunk.is_enabled() && self.revert_hunk_button.is_some();
 
-        // Show comment button independently of diff hunk state when requested
+        let hide_comment_gutter_icons = should_hide_comment_gutter_icons(
+            attached_comment.is_some(),
+            self.comment_box
+                .as_ref()
+                .is_some_and(|comment_box| comment_box.line.is_same_line(line)),
+        );
+        let show_saved_comment_indicator =
+            is_active_comment_on_current_line && !hide_comment_gutter_icons;
+        let should_show_diff_hunk_icons = should_show_diff_hunk_icons && !hide_comment_gutter_icons;
+
+        // Show comment button independently of diff hunk state when requested.
         let show_comment_button = FeatureFlag::InlineCodeReview.is_enabled()
             && self.comment_button.is_some()
-            && (should_show_comment_button || is_active_comment_on_current_line);
+            && !hide_comment_gutter_icons
+            && (should_show_comment_button || show_saved_comment_indicator);
 
-        if should_show_diff_hunk_icons || is_active_comment_on_current_line || show_comment_button {
+        if should_show_diff_hunk_icons || show_saved_comment_indicator || show_comment_button {
             let mut buttons = Flex::row().with_main_axis_size(MainAxisSize::Min);
             if let Some(comment_button) =
                 self.comment_button.as_ref().filter(|_| show_comment_button)
@@ -1388,10 +1489,29 @@ impl<V: EditorView> Element for EditorWrapper<V> {
             for decoration in model.decorations().line_decoration_ranges() {
                 let start_y = content.y_offset_at_line(decoration.start);
                 let end_y = content.y_offset_at_line(decoration.end);
+                let mut extended_end_y = end_y;
+                if let Some(comment_box) = &self.comment_box {
+                    self.extend_decoration_end_for_inline_comment(
+                        start_y,
+                        end_y,
+                        &mut extended_end_y,
+                        &comment_box.line,
+                        model,
+                    );
+                }
+                for saved_comment in &self.saved_comments {
+                    self.extend_decoration_end_for_inline_comment(
+                        start_y,
+                        end_y,
+                        &mut extended_end_y,
+                        saved_comment.location(),
+                        model,
+                    );
+                }
                 ctx.scene
                     .draw_rect_without_hit_recording(RectF::new(
                         origin + vec2f(0., (start_y - y_adjustment).as_f32()),
-                        vec2f(wrapper_size.x(), (end_y - start_y).as_f32()),
+                        vec2f(wrapper_size.x(), (extended_end_y - start_y).as_f32()),
                     ))
                     .with_background(decoration.overlay);
             }

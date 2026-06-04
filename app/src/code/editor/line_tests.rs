@@ -48,6 +48,14 @@ fn current_line_maps_to_current_render_slot() {
     );
 }
 
+#[test]
+fn current_line_maps_to_next_render_slot_for_inline_comment_blocks() {
+    assert_eq!(
+        current(7).into_inline_comment_render_line_location(),
+        RenderLineLocation::Current(LineCount::from(8))
+    );
+}
+
 /// `is_same_line` treats two removed lines as the same only when both `line_number` and hunk
 /// `index` match, so distinct removed-line slots on the same `line_number` are NOT the same line
 /// (they stack at different slots rather than collapsing).

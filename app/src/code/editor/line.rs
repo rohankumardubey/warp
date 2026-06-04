@@ -72,7 +72,31 @@ impl EditorLineLocation {
                 index_from_at_line: index,
             },
             EditorLineLocation::Collapsed { line_range } => {
-                debug_assert!(false, "We don't support converting from collapsed line location to render line location yet");
+                debug_assert!(
+                    false,
+                    "We don't support converting from collapsed line location to render line location yet"
+                );
+                RenderLineLocation::Current(line_range.start)
+            }
+        }
+    }
+
+    pub fn into_inline_comment_render_line_location(self) -> RenderLineLocation {
+        match self {
+            EditorLineLocation::Current { line_number, .. } => {
+                RenderLineLocation::Current(line_number + LineCount::from(1))
+            }
+            EditorLineLocation::Removed {
+                line_number, index, ..
+            } => RenderLineLocation::Temporary {
+                at_line: line_number,
+                index_from_at_line: index,
+            },
+            EditorLineLocation::Collapsed { line_range } => {
+                debug_assert!(
+                    false,
+                    "We don't support converting from collapsed line location to render line location yet"
+                );
                 RenderLineLocation::Current(line_range.start)
             }
         }

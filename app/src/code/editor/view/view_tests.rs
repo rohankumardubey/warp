@@ -72,6 +72,7 @@ fn initialize_editor(app: &mut App) -> (WindowId, ViewHandle<CodeEditorView>) {
 const MULTILINE_CONTENT: &str = "line one\nline two\nline three\nline four\nline five\nline six\n";
 
 fn current_line(line_number: usize) -> EditorLineLocation {
+    let line_number = line_number.saturating_sub(1);
     EditorLineLocation::Current {
         line_number: LineCount::from(line_number),
         line_range: LineCount::from(line_number)..LineCount::from(line_number + 1),
