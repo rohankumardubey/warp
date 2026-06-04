@@ -75,6 +75,7 @@ fn api_keys_with_warp_credit_fallback_setting_creates_fallback_only_api_keys() {
     assert!(api_keys.google.is_empty());
     assert!(api_keys.open_router.is_empty());
     assert!(api_keys.aws_credentials.is_none());
+    assert!(api_keys.google_cloud_credentials.is_none());
 }
 
 #[test]
@@ -87,6 +88,7 @@ fn api_keys_with_warp_credit_fallback_setting_preserves_existing_keys() {
             open_router: String::new(),
             allow_use_of_warp_credits: false,
             aws_credentials: None,
+            google_cloud_credentials: None,
         }),
         true,
     )
