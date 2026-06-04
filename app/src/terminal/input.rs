@@ -14790,26 +14790,14 @@ impl Input {
     fn apply_input_banner_padding(
         &self,
         banner: Box<dyn Element>,
-        should_expand_banner: bool,
         is_compact_mode: bool,
         input_mode: InputMode,
-        appearance: &Appearance,
         app: &AppContext,
     ) -> Box<dyn Element> {
-        let banner_height = 2. * appearance.line_height_ratio() * appearance.monospace_font_size();
-        let constrained_banner = if should_expand_banner {
-            ConstrainedBox::new(banner)
-                .with_min_height(banner_height)
-                .finish()
-        } else {
-            ConstrainedBox::new(banner)
-                .with_height(banner_height)
-                .finish()
-        };
         let should_use_udi_spacing = self.should_show_universal_developer_input(app)
             || (FeatureFlag::AgentView.is_enabled()
                 && self.agent_view_controller.as_ref(app).is_active());
-        let mut container: Container = Container::new(constrained_banner);
+        let mut container: Container = Container::new(banner);
         let (suggestion_to_prompt_padding, suggestion_to_input_border_padding) =
             if should_use_udi_spacing {
                 (0., 0.)
@@ -14834,7 +14822,6 @@ impl Input {
     /// Renders a banner that should stay next to the input box.
     fn render_input_banner(
         &self,
-        appearance: &Appearance,
         app: &AppContext,
         input_mode: InputMode,
         is_compact_mode: bool,
@@ -14845,18 +14832,11 @@ impl Input {
             }
 
             let prompt_suggestions_banner = ChildView::new(&self.prompt_suggestions_view).finish();
-            let should_expand_banner = prompt_suggestions_banner_state
-                .accept_button_mouse_state
-                .lock()
-                .unwrap()
-                .is_hovered();
 
             Some(self.apply_input_banner_padding(
                 prompt_suggestions_banner,
-                should_expand_banner,
                 is_compact_mode,
                 input_mode,
-                appearance,
                 app,
             ))
         } else {
