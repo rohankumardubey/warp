@@ -168,7 +168,7 @@ fn render_button(
         icon_color.a = opacity_u8;
 
         let text = {
-            let base = Text::new_inline(
+            let base = Text::new(
                 text,
                 appearance.ui_font_family(),
                 appearance.monospace_font_size(),
@@ -266,7 +266,7 @@ fn render_button(
         }
 
         ConstrainedBox::new(stack.finish())
-            .with_height(button_height)
+            .with_min_height(button_height)
             .finish()
     })
     .with_cursor(Cursor::PointingHand);

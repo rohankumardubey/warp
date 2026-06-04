@@ -14796,7 +14796,7 @@ impl Input {
         app: &AppContext,
     ) -> Box<dyn Element> {
         let constrained_banner = ConstrainedBox::new(banner)
-            .with_height(2. * appearance.line_height_ratio() * appearance.monospace_font_size())
+            .with_min_height(2. * appearance.line_height_ratio() * appearance.monospace_font_size())
             .finish();
         let should_use_udi_spacing = self.should_show_universal_developer_input(app)
             || (FeatureFlag::AgentView.is_enabled()
