@@ -967,9 +967,7 @@ impl Entity for BlocklistAIInputModel {
 
 /// Returns the timestamp of the most-recent entry that closely matches the
 /// provided word, using the given similarity threshold, or `None` if no entry
-/// matches. Callers must pass `possibilities` newest-first, so the first match
-/// encountered is the most-recent one; the returned timestamp is itself optional
-/// because some entries (e.g. history-file commands) carry no timestamp.
+/// matches. 
 ///
 /// Adapted from [`difflib::get_close_matches`], but an async function with
 /// periodic yields such that the operation can be aborted if necessary.  Also,
@@ -1008,11 +1006,6 @@ async fn most_recent_close_match<'a>(
 
 /// Resolves the history-match decision from the command-history and agent
 /// prompt-history match results produced by [`most_recent_close_match`].
-///
-/// Each argument is the result for one history source: the outer `Option`
-/// indicates whether that source had a close match, and the inner
-/// `Option<DateTime>` is that match's timestamp (commands read from a history
-/// file may carry no timestamp).
 ///
 /// Returns `None` when neither source matched, in which case the caller falls
 /// through to the classifier and the decision source is *not* `HistoryMatch`.
