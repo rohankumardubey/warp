@@ -65,7 +65,7 @@ use crate::Appearance;
 const ASK_USER_QUESTION_ACTIVE: &str = "AskUserQuestionActive";
 
 pub(crate) const ASK_USER_QUESTION_AUTO_ADVANCE_DELAY: Duration = Duration::from_millis(300);
-pub(crate) const ASK_USER_QUESTION_MAX_CONTAINER_HEIGHT: f32 = 320.;
+pub(crate) const ASK_USER_QUESTION_MAX_CONTAINER_HEIGHT: f32 = 520.;
 pub(crate) const ASK_USER_QUESTION_SINGLE_MAX_CONTAINER_HEIGHT: f32 = 800.;
 // Must match `MARGIN_BETWEEN_BUTTONS` in number_shortcut_buttons.rs so off-screen measurement
 // copies match the interactive option list's height.
@@ -375,6 +375,17 @@ impl AskUserQuestionSession {
             question: self.questions.get(editing.current_question_index())?,
             draft: editing.current_draft(),
         })
+    }
+
+    /// Saved draft for the question at `index` (None when unanswered or not editing). Lets the
+    /// off-screen measurement copies reflect each question's real answer state, so a long saved
+    /// "Other..." answer is accounted for in the reserved height instead of resizing the card when
+    /// the user navigates back to that question.
+    fn draft_for_question(&self, index: usize) -> Option<&QuestionDraft> {
+        let AskUserQuestionState::Editing(editing) = &self.state else {
+            return None;
+        };
+        editing.draft_for_question(index)
     }
 
     fn current_question_index(&self) -> usize {
@@ -1230,7 +1241,7 @@ impl AskUserQuestionView {
         let current = self.session.current()?;
         let question_text = Self::question_display_text(current.question);
         let is_single_question = !self.session.has_multiple_questions();
-        let has_nav_footer = self.session.has_multiple_questions();
+        let has_nav_footer = !is_single_question;
 
         let max_height = if is_single_question {
             ASK_USER_QUESTION_SINGLE_MAX_CONTAINER_HEIGHT
@@ -1271,9 +1282,13 @@ impl AskUserQuestionView {
             visible_body
         } else {
             let mut stack = Stack::new();
-            for question in self.session.questions() {
+            for (index, question) in self.session.questions().iter().enumerate() {
                 stack.add_child(Self::render_measurement_body(
-                    question, appearance, theme, app,
+                    question,
+                    self.session.draft_for_question(index),
+                    appearance,
+                    theme,
+                    app,
                 ));
             }
             stack.add_child(visible_body);
@@ -1498,8 +1513,8 @@ impl AskUserQuestionView {
     }
 
     /// Stacks the question text above its options. Shared by the live body and its measurement
-    /// copies. `MainAxisSize::Min` keeps the column content-sized under a bounded constraint, which
-    /// the measurement copies rely on since they have no scrollable to absorb a fill.
+    /// copies. `MainAxisSize::Min` keeps the column content-sized so the surrounding scrollable
+    /// reports the natural height (clamped to the cap) instead of filling the available space.
     fn body_column(question_text: Box<dyn Element>, options: Box<dyn Element>) -> Box<dyn Element> {
         Flex::column()
             .with_main_axis_size(MainAxisSize::Min)
@@ -1539,22 +1554,25 @@ impl AskUserQuestionView {
     }
 
     /// Builds a non-interactive, non-painted copy of a question's body purely for layout
-    /// measurement. It mirrors the live body's column and insets but omits the scrollable (the copy
-    /// is never scrolled or painted); `MeasureOnly` clamps its height to the available space.
+    /// measurement. It goes through the same `wrap_scrollable_body` wrapper as the live body so the
+    /// two measure identically once a question overflows (the scrollable affects wrapping and
+    /// clamping); `MeasureOnly` keeps it off-screen and inert. The question's saved `draft` is
+    /// passed through so the copy reflects its real answer state (e.g. a long custom "Other..."
+    /// answer) and the card stays a fixed height across navigation.
     fn render_measurement_body(
         question: &AskUserQuestionItem,
+        draft: Option<&QuestionDraft>,
         appearance: &Appearance,
         theme: &WarpTheme,
         app: &AppContext,
     ) -> Box<dyn Element> {
-        let current = AskUserQuestionCurrent {
-            question,
-            draft: None,
-        };
-        let body = Self::with_body_insets(Self::body_column(
+        let current = AskUserQuestionCurrent { question, draft };
+        let body = Self::wrap_scrollable_body(
             Self::render_question_text(&Self::question_display_text(question), appearance, theme),
             Self::render_static_options(current, app),
-        ));
+            ClippedScrollStateHandle::new(),
+            theme,
+        );
         MeasureOnly::new(body).finish()
     }
 
