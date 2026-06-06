@@ -1,5 +1,7 @@
+use std::env;
 use std::io::{self, Read};
-use std::os::unix::io::RawFd;
+use std::os::unix::io::{AsRawFd, RawFd};
+use std::process::{Child, Stdio};
 use std::sync::atomic::{AtomicI32, Ordering};
 
 use anyhow::{Context, Result};
@@ -74,6 +76,152 @@ impl Mode {
     }
 }
 
+// ── Agent subprocess ─────────────────────────────────────────────────
+
+struct AgentProcess {
+    child: Child,
+    stdout_fd: RawFd,
+    line_buffer: Vec<u8>,
+}
+
+impl AgentProcess {
+    #[allow(clippy::disallowed_types)] // wsh is Unix-only; no Windows terminal flash concern.
+    fn spawn(prompt: &str) -> Result<Self> {
+        let binary = env::var("WSH_AGENT_BINARY").unwrap_or_else(|_| "warp".into());
+        let child = std::process::Command::new(&binary)
+            .args(["agent", "run", "--prompt", prompt, "--output-format", "ndjson"])
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .with_context(|| format!("failed to spawn `{binary} agent run`"))?;
+
+        let stdout = child.stdout.as_ref().expect("piped stdout");
+        let stdout_fd = stdout.as_raw_fd();
+
+        // Make stdout non-blocking for polling.
+        let flags = unsafe { libc::fcntl(stdout_fd, libc::F_GETFL) };
+        unsafe { libc::fcntl(stdout_fd, libc::F_SETFL, flags | libc::O_NONBLOCK) };
+
+        Ok(Self {
+            child,
+            stdout_fd,
+            line_buffer: Vec::new(),
+        })
+    }
+
+    fn read_lines(&mut self) -> Vec<String> {
+        let mut buf = [0u8; 4096];
+        let mut lines = Vec::new();
+
+        loop {
+            let n = match read(self.stdout_fd, &mut buf) {
+                Ok(0) => break,
+                Ok(n) => n,
+                Err(_) => break,
+            };
+            self.line_buffer.extend_from_slice(&buf[..n]);
+        }
+
+        // Extract complete lines from the buffer.
+        while let Some(pos) = self.line_buffer.iter().position(|&b| b == b'\n') {
+            let line = self.line_buffer.drain(..=pos).collect::<Vec<_>>();
+            if let Ok(s) = String::from_utf8(line) {
+                let trimmed = s.trim().to_string();
+                if !trimmed.is_empty() {
+                    lines.push(trimmed);
+                }
+            }
+        }
+
+        lines
+    }
+
+    fn is_finished(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(Some(_)))
+    }
+
+    fn kill(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+// ── NDJSON event parsing ─────────────────────────────────────────────
+
+fn parse_agent_event(line: &str, cols: usize) -> Option<(String, Color, CellFlags)> {
+    let json: serde_json::Value = serde_json::from_str(line).ok()?;
+    let event_type = json.get("type")?.as_str()?;
+
+    match event_type {
+        "agent" | "agent_reasoning" => {
+            let text = json.get("text")?.as_str()?;
+            if text.trim().is_empty() {
+                return None;
+            }
+            let color = if event_type == "agent_reasoning" {
+                Color::Indexed(8) // dim gray for reasoning
+            } else {
+                Color::Default
+            };
+            Some((text.to_string(), color, CellFlags::empty()))
+        }
+        "tool_call" => {
+            let tool = json.get("tool").and_then(|t| t.as_str()).unwrap_or("tool");
+            let summary = json
+                .get("summary")
+                .and_then(|s| s.as_str())
+                .or_else(|| json.get("command").and_then(|c| c.as_str()))
+                .unwrap_or("");
+            let display = if summary.is_empty() {
+                format!("⚡ {tool}")
+            } else {
+                let max = cols.saturating_sub(4);
+                let s = if summary.len() > max {
+                    format!("{}…", &summary[..max.saturating_sub(1)])
+                } else {
+                    summary.to_string()
+                };
+                format!("⚡ {tool}: {s}")
+            };
+            Some((display, Color::Indexed(3), CellFlags::DIM)) // yellow
+        }
+        "tool_result" => {
+            // Show a condensed result — just the first meaningful line.
+            let output = json
+                .get("output")
+                .and_then(|o| o.as_str())
+                .unwrap_or("");
+            let first_line = output.lines().next().unwrap_or("(done)");
+            let max = cols.saturating_sub(4);
+            let display = if first_line.len() > max {
+                format!("  ↪ {}…", &first_line[..max.saturating_sub(3)])
+            } else {
+                format!("  ↪ {first_line}")
+            };
+            Some((display, Color::Indexed(8), CellFlags::DIM)) // dim gray
+        }
+        "tool_error" => {
+            let error = json
+                .get("error")
+                .and_then(|e| e.as_str())
+                .unwrap_or("unknown error");
+            Some((format!("✗ {error}"), Color::Indexed(1), CellFlags::empty())) // red
+        }
+        "tool_canceled" => {
+            Some(("✗ canceled".to_string(), Color::Indexed(3), CellFlags::DIM))
+        }
+        _ => {
+            // Unknown event type — show raw for debugging.
+            let preview = if line.len() > cols {
+                format!("{}…", &line[..cols.saturating_sub(1)])
+            } else {
+                line.to_string()
+            };
+            Some((preview, Color::Indexed(8), CellFlags::DIM))
+        }
+    }
+}
+
 // ── Interleaved OSC parser ──────────────────────────────────────────
 
 enum ParsedItem {
@@ -116,6 +264,7 @@ pub fn run(master_fd: RawFd) -> Result<()> {
         osc_parser: OscParser::new(),
         miniterm: MiniTerm::new(cols, usable),
         blocks: BlockManager::new(),
+        agent: None,
         cols,
         rows,
         should_exit: false,
@@ -123,6 +272,11 @@ pub fn run(master_fd: RawFd) -> Result<()> {
     state.render_frame();
 
     let result = state.run_loop(sigwinch_fd);
+
+    // Clean up agent subprocess if still running.
+    if let Some(mut agent) = state.agent.take() {
+        agent.kill();
+    }
 
     let _ = screen::leave_alt_screen();
 
@@ -143,6 +297,7 @@ struct Wsh {
     osc_parser: OscParser,
     miniterm: MiniTerm,
     blocks: BlockManager,
+    agent: Option<AgentProcess>,
     cols: u16,
     rows: u16,
     should_exit: bool,
@@ -158,14 +313,18 @@ impl Wsh {
                 break;
             }
 
+            // Build poll fds: stdin, master, sigwinch, and optionally agent stdout.
+            let agent_fd = self.agent.as_ref().map(|a| a.stdout_fd).unwrap_or(-1);
             let mut pollfds = [
                 libc::pollfd { fd: stdin_fd, events: libc::POLLIN, revents: 0 },
                 libc::pollfd { fd: self.master_fd, events: libc::POLLIN, revents: 0 },
                 libc::pollfd { fd: sigwinch_fd, events: libc::POLLIN, revents: 0 },
+                libc::pollfd { fd: agent_fd, events: libc::POLLIN, revents: 0 },
             ];
+            let nfds = if agent_fd >= 0 { 4 } else { 3 };
 
             let ret = unsafe {
-                libc::poll(pollfds.as_mut_ptr(), pollfds.len() as libc::nfds_t, -1)
+                libc::poll(pollfds.as_mut_ptr(), nfds as libc::nfds_t, -1)
             };
             if ret < 0 {
                 let err = io::Error::last_os_error();
@@ -177,11 +336,13 @@ impl Wsh {
 
             let mut needs_render = false;
 
+            // SIGWINCH
             if pollfds[2].revents & libc::POLLIN != 0 {
                 self.handle_resize(sigwinch_fd)?;
                 needs_render = true;
             }
 
+            // PTY output
             if pollfds[1].revents & libc::POLLIN != 0 {
                 match read(self.master_fd, &mut buf) {
                     Ok(0) | Err(_) => break,
@@ -192,12 +353,20 @@ impl Wsh {
                 }
             }
 
+            // Child shell exited
             if pollfds[1].revents & libc::POLLHUP != 0 {
                 self.drain_pty(&mut buf);
                 self.render_frame();
                 break;
             }
 
+            // Agent subprocess output
+            if nfds == 4 && pollfds[3].revents & (libc::POLLIN | libc::POLLHUP) != 0 {
+                self.handle_agent_output();
+                needs_render = true;
+            }
+
+            // stdin
             if pollfds[0].revents & libc::POLLIN != 0 {
                 let n = io::stdin().read(&mut buf).context("read stdin")?;
                 if n == 0 {
@@ -225,7 +394,7 @@ impl Wsh {
             active_cursor: self.miniterm.cursor_pos(),
             status_bar: StatusBar {
                 mode: self.mode.label(),
-                model: "mock",
+                model: "warp",
                 hint: self.mode.hint(),
             },
             scroll_offset: self.blocks.scroll_offset(),
@@ -234,7 +403,7 @@ impl Wsh {
                 _ => None,
             },
             agent_status: match &self.mode {
-                Mode::AgentRunning => Some("⠋ thinking..."),
+                Mode::AgentRunning => Some("⠋ agent working..."),
                 _ => None,
             },
             total_rows: self.rows,
@@ -279,7 +448,8 @@ impl Wsh {
                 self.blocks.scroll_to_bottom();
             }
             ShellEvent::PromptEnd => {
-                if matches!(self.mode, Mode::AgentRunning) {
+                // If agent finished and shell prompt returned, go back to Shell.
+                if matches!(self.mode, Mode::AgentRunning) && self.agent.is_none() {
                     self.mode = Mode::Shell;
                 }
             }
@@ -291,7 +461,8 @@ impl Wsh {
         let mut rows = self.miniterm.take_scrolled_out();
         rows.extend(self.miniterm.grid().iter().cloned());
         self.blocks.add_block(rows);
-        self.miniterm.reset();
+        let usable = self.rows.saturating_sub(1);
+        self.miniterm.resize(self.cols, usable);
     }
 
     fn drain_pty(&mut self, buf: &mut [u8]) {
@@ -304,6 +475,51 @@ impl Wsh {
                         self.miniterm.process_bytes(&filtered);
                     }
                 }
+            }
+        }
+    }
+
+    // ── Agent subprocess output ───────────────────────────────────────
+
+    fn handle_agent_output(&mut self) {
+        let agent = match self.agent.as_mut() {
+            Some(a) => a,
+            None => return,
+        };
+
+        let lines = agent.read_lines();
+        let cols = self.cols as usize;
+
+        for line in &lines {
+            if let Some((text, color, flags)) = parse_agent_event(line, cols) {
+                // Agent text output can be multi-line — add each line separately.
+                for text_line in text.lines() {
+                    self.blocks.add_styled_line(text_line, color, flags, cols);
+                }
+            }
+        }
+
+        // Check if the agent process has finished.
+        if let Some(agent) = self.agent.as_mut() {
+            if agent.is_finished() {
+                // Drain any remaining output.
+                let final_lines = agent.read_lines();
+                for line in &final_lines {
+                    if let Some((text, color, flags)) = parse_agent_event(line, cols) {
+                        for text_line in text.lines() {
+                            self.blocks.add_styled_line(text_line, color, flags, cols);
+                        }
+                    }
+                }
+                self.agent = None;
+                self.blocks.add_styled_line(
+                    "✓ agent finished",
+                    Color::Indexed(2), // green
+                    CellFlags::DIM,
+                    cols,
+                );
+                // If no PTY command is pending, return to Shell immediately.
+                self.mode = Mode::Shell;
             }
         }
     }
@@ -353,8 +569,16 @@ impl Wsh {
     }
 
     fn cancel_agent(&mut self) {
+        if let Some(mut agent) = self.agent.take() {
+            agent.kill();
+        }
         self.mode = Mode::Shell;
-        let _ = nix_write(self.master_fd, b"\x03");
+        self.blocks.add_styled_line(
+            "✗ agent canceled",
+            Color::Indexed(3),
+            CellFlags::DIM,
+            self.cols as usize,
+        );
     }
 
     fn handle_agent_input_bytes(&mut self, bytes: &[u8]) -> Result<()> {
@@ -385,49 +609,49 @@ impl Wsh {
         Ok(())
     }
 
-    // ── Mock agent ────────────────────────────────────────────────────
+    // ── Agent submission ──────────────────────────────────────────────
 
     fn submit_agent_query(&mut self) -> Result<()> {
-        let command = match &self.mode {
+        let prompt = match &self.mode {
             Mode::AgentInput { buffer, .. } => buffer.clone(),
             _ => return Ok(()),
         };
 
-        if command.trim().is_empty() {
+        if prompt.trim().is_empty() {
             self.exit_agent_mode();
             return Ok(());
         }
 
-        match command.trim() {
-            "help" => {
+        if prompt.trim() == "exit" {
+            self.should_exit = true;
+            return Ok(());
+        }
+
+        self.blocks.add_styled_line(
+            &format!("🤖 {prompt}"),
+            Color::Indexed(5),
+            CellFlags::empty(),
+            self.cols as usize,
+        );
+
+        // Spawn the real agent subprocess.
+        match AgentProcess::spawn(&prompt) {
+            Ok(agent) => {
+                self.agent = Some(agent);
+                self.mode = Mode::AgentRunning;
+            }
+            Err(e) => {
                 self.blocks.add_styled_line(
-                    "🤖 Type any command. Special: help, exit",
-                    Color::Indexed(6),
-                    CellFlags::DIM,
+                    &format!("✗ failed to start agent: {e}"),
+                    Color::Indexed(1),
+                    CellFlags::empty(),
                     self.cols as usize,
                 );
                 self.mode = Mode::Shell;
                 let _ = nix_write(self.master_fd, b"\n");
-                return Ok(());
             }
-            "exit" => {
-                self.should_exit = true;
-                return Ok(());
-            }
-            _ => {}
         }
 
-        self.blocks.add_styled_line(
-            &format!("🤖 running: {command}"),
-            Color::Indexed(5),
-            CellFlags::DIM,
-            self.cols as usize,
-        );
-
-        let cmd = format!("{command}\n");
-        nix_write(self.master_fd, cmd.as_bytes()).context("write command to pty")?;
-
-        self.mode = Mode::AgentRunning;
         Ok(())
     }
 }

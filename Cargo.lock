@@ -16743,6 +16743,8 @@ dependencies = [
  "libc",
  "log",
  "nix 0.26.4",
+ "serde",
+ "serde_json",
  "vte",
 ]
 
