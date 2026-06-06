@@ -5753,7 +5753,6 @@ impl TerminalView {
                     | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. }
                     | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
                     | BlocklistAIHistoryEvent::UpdatedStreamingExchange { .. }
-                    | BlocklistAIHistoryEvent::AppendedExchange { .. }
                     | BlocklistAIHistoryEvent::SetActiveConversation { .. }
                     | BlocklistAIHistoryEvent::RestoredConversations { .. }
             )
@@ -6157,6 +6156,11 @@ impl TerminalView {
                     }
                 }
             }
+            BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. } => {
+                // Conversation title changes flow through metadata updates after
+                // server-confirmed renames, so refresh pane chrome immediately.
+                self.update_pane_configuration(ctx);
+            }
             BlocklistAIHistoryEvent::ClearedConversationsInTerminalView {
                 active_conversation_id,
                 ..
@@ -6235,7 +6239,6 @@ impl TerminalView {
             | BlocklistAIHistoryEvent::UpdatedTodoList { .. }
             | BlocklistAIHistoryEvent::RestoredConversations { .. }
             | BlocklistAIHistoryEvent::UpgradedTask { .. }
-            | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. }
             | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
             | BlocklistAIHistoryEvent::ConversationServerTokenAssigned { .. }
             | BlocklistAIHistoryEvent::NewConversationRequestComplete { .. }
