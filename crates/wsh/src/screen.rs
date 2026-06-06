@@ -10,6 +10,16 @@ use crossterm::terminal;
 
 use crate::cell::{Cell, CellAttr, CellFlags, Color};
 
+fn last_non_blank_row(grid: &[Vec<Cell>]) -> Option<usize> {
+    let blank = Cell::default();
+    for (i, row) in grid.iter().enumerate().rev() {
+        if row.iter().any(|c| *c != blank) {
+            return Some(i);
+        }
+    }
+    None
+}
+
 pub struct StatusBar<'a> {
     pub mode: &'a str,
     pub model: &'a str,
@@ -72,7 +82,11 @@ fn compute_layout(frame: &Frame) -> Layout {
     let active_height = if hide_active {
         0
     } else {
-        let content_height = (frame.active_cursor.0 + 1).max(1);
+        let cursor_height = frame.active_cursor.0 + 1;
+        let grid_content_height = last_non_blank_row(frame.active_grid)
+            .map(|r| r + 1)
+            .unwrap_or(0);
+        let content_height = cursor_height.max(grid_content_height).max(1);
         content_height.min(usable)
     };
     let scrollback_height = usable.saturating_sub(active_height);
@@ -410,9 +424,9 @@ mod tests {
             show_cursor: true,
         };
         let layout = compute_layout(&frame);
-        // cursor at (0,0) → content_height = 1, usable = 23
-        assert_eq!(layout.active_height, 1);
-        assert_eq!(layout.scrollback_height, 22);
+        // cursor at (0,0) but 5 non-blank rows → content_height = 5, usable = 23
+        assert_eq!(layout.active_height, 5);
+        assert_eq!(layout.scrollback_height, 18);
         assert_eq!(layout.status_bar_row, 23);
     }
 
@@ -462,9 +476,9 @@ mod tests {
             show_cursor: true,
         };
         let layout = compute_layout(&frame);
-        // cursor at (0,0) → content_height = 1, usable = 9
-        assert_eq!(layout.active_height, 1);
-        assert_eq!(layout.scrollback_height, 8);
+        // 100 non-blank rows but usable = 9 → clamped
+        assert_eq!(layout.active_height, 9);
+        assert_eq!(layout.scrollback_height, 0);
     }
 
     #[test]
@@ -540,6 +554,61 @@ mod tests {
         assert_eq!(layout.active_height, 0);
         assert_eq!(layout.scrollback_height, 22);
         assert_eq!(layout.status_bar_row, 23);
+    }
+
+    #[test]
+    fn layout_content_below_cursor_shown() {
+        // Simulates zsh completions: cursor on row 0, content on rows 1-3
+        let mut active_grid: Vec<Vec<Cell>> = vec![vec![Cell::default(); 80]; 23];
+        active_grid[0] = make_row("$ cd ");
+        active_grid[1] = make_row("dir1/");
+        active_grid[2] = make_row("dir2/");
+        active_grid[3] = make_row("dir3/");
+        let frame = Frame {
+            completed_rows: &[],
+            streaming_rows: &[],
+            active_grid: &active_grid,
+            active_cursor: (0, 5),
+            status_bar: StatusBar {
+                mode: "SHELL",
+                model: "",
+                hint: "",
+            },
+            scroll_offset: 0,
+            agent_input: None, agent_status: None,
+            total_rows: 24,
+            total_cols: 80,
+            show_cursor: true,
+        };
+        let layout = compute_layout(&frame);
+        // cursor at row 0, but content extends to row 3 → active_height = 4
+        assert_eq!(layout.active_height, 4);
+        assert_eq!(layout.scrollback_height, 19);
+    }
+
+    #[test]
+    fn layout_blank_grid_stays_compact() {
+        // All-blank grid with cursor at row 0 → stays compact at 1 row
+        let active_grid: Vec<Vec<Cell>> = vec![vec![Cell::default(); 80]; 23];
+        let frame = Frame {
+            completed_rows: &[],
+            streaming_rows: &[],
+            active_grid: &active_grid,
+            active_cursor: (0, 0),
+            status_bar: StatusBar {
+                mode: "SHELL",
+                model: "",
+                hint: "",
+            },
+            scroll_offset: 0,
+            agent_input: None, agent_status: None,
+            total_rows: 24,
+            total_cols: 80,
+            show_cursor: true,
+        };
+        let layout = compute_layout(&frame);
+        assert_eq!(layout.active_height, 1);
+        assert_eq!(layout.scrollback_height, 22);
     }
 
     // -- Color conversion tests --
