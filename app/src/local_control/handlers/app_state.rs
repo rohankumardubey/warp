@@ -11,7 +11,6 @@ use warp_util::path::LineAndColumnArg;
 use warpui::{ModelContext, SingletonEntity, TypedActionView, ViewHandle};
 
 use crate::cloud_object::model::persistence::CloudModel;
-use crate::cloud_object::CloudObject as _;
 use crate::drive::items::WarpDriveItemId;
 use crate::local_control::resolver::target_window_id_for_target;
 use crate::local_control::LocalControlBridge;
@@ -125,7 +124,6 @@ pub(crate) fn handle(
             ctx,
         ),
         ActionKind::FileOpen => file_open(instance_id, params, ctx),
-        ActionKind::ProjectOpen => project_open(instance_id, params, ctx),
         ActionKind::DriveOpen => drive_open(instance_id, params, ctx),
         ActionKind::DriveNotebookOpen => drive_notebook_open(instance_id, params, ctx),
         ActionKind::DriveEnvVarCollectionOpen => {
@@ -569,20 +567,6 @@ fn file_open(
     )
 }
 
-fn project_open(
-    instance_id: &Option<InstanceId>,
-    params: &serde_json::Value,
-    ctx: &mut ModelContext<LocalControlBridge>,
-) -> Result<serde_json::Value, ControlError> {
-    let path = path_param(ActionKind::ProjectOpen, params)?;
-    workspace_action(
-        instance_id,
-        ActionKind::ProjectOpen,
-        WorkspaceAction::OpenRepository { path: Some(path) },
-        ctx,
-    )
-}
-
 fn drive_open(
     instance_id: &Option<InstanceId>,
     params: &serde_json::Value,
@@ -739,13 +723,6 @@ fn rename_param(action: ActionKind, params: &serde_json::Value) -> Result<String
 fn text_param(action: ActionKind, params: &serde_json::Value) -> Result<String, ControlError> {
     match action_params(params)? {
         ActionParams::Text { text } => Ok(text),
-        _ => invalid_params(action),
-    }
-}
-
-fn path_param(action: ActionKind, params: &serde_json::Value) -> Result<String, ControlError> {
-    match action_params(params)? {
-        ActionParams::Path { path } => Ok(path),
         _ => invalid_params(action),
     }
 }
