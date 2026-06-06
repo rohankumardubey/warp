@@ -23,6 +23,7 @@ pub struct Frame<'a> {
     pub status_bar: StatusBar<'a>,
     pub scroll_offset: usize,
     pub agent_input: Option<(&'a str, usize)>,
+    pub agent_status: Option<&'a str>,
     pub total_rows: u16,
     pub total_cols: u16,
     pub show_cursor: bool,
@@ -54,29 +55,44 @@ struct Layout {
     scrollback_height: usize,
     active_height: usize,
     agent_input_row: Option<u16>,
+    agent_status_row: Option<u16>,
     status_bar_row: u16,
 }
 
 fn compute_layout(frame: &Frame) -> Layout {
     let total = frame.total_rows as usize;
     let has_input = frame.agent_input.is_some();
-    let reserved = 1 + if has_input { 1 } else { 0 };
+    let has_status = frame.agent_status.is_some();
+    let reserved = 1
+        + if has_input { 1 } else { 0 }
+        + if has_status { 1 } else { 0 };
     let usable = total.saturating_sub(reserved);
 
     let active_height = frame.active_grid.len().min(usable);
     let scrollback_height = usable.saturating_sub(active_height);
 
+    // Layout from bottom: status_bar, then agent_input, then agent_status,
+    // then active block, then scrollback.
+    let status_bar_row = (total - 1) as u16;
+    let mut next_row = total - 2;
     let agent_input_row = if has_input {
-        Some((total - 2) as u16)
+        let row = next_row as u16;
+        next_row = next_row.saturating_sub(1);
+        Some(row)
     } else {
         None
     };
-    let status_bar_row = (total - 1) as u16;
+    let agent_status_row = if has_status {
+        Some(next_row as u16)
+    } else {
+        None
+    };
 
     Layout {
         scrollback_height,
         active_height,
         agent_input_row,
+        agent_status_row,
         status_bar_row,
     }
 }
@@ -128,6 +144,14 @@ pub fn render(frame: &Frame) -> anyhow::Result<()> {
         } else {
             render_blank_row(&mut stdout, cols)?;
         }
+    }
+
+    // --- Agent status (ephemeral) ---
+    if let (Some(status_row), Some(status_text)) =
+        (layout.agent_status_row, frame.agent_status)
+    {
+        queue!(stdout, cursor::MoveTo(0, status_row))?;
+        render_agent_status(&mut stdout, status_text, cols)?;
     }
 
     // --- Agent input line ---
@@ -266,6 +290,28 @@ fn render_blank_row(stdout: &mut io::Stdout, cols: usize) -> anyhow::Result<()> 
     Ok(())
 }
 
+fn render_agent_status(
+    stdout: &mut io::Stdout,
+    text: &str,
+    cols: usize,
+) -> anyhow::Result<()> {
+    queue!(
+        stdout,
+        SetAttribute(Attribute::Reset),
+        SetAttribute(Attribute::Dim),
+        SetForegroundColor(CtColor::AnsiValue(5)), // magenta
+        Print(text),
+    )?;
+    let used = text.chars().count();
+    if used < cols {
+        for _ in used..cols {
+            queue!(stdout, Print(' '))?;
+        }
+    }
+    queue!(stdout, SetAttribute(Attribute::Reset))?;
+    Ok(())
+}
+
 fn render_agent_input(
     stdout: &mut io::Stdout,
     buf: &str,
@@ -367,7 +413,7 @@ mod tests {
                 hint: "",
             },
             scroll_offset: 0,
-            agent_input: None,
+            agent_input: None, agent_status: None,
             total_rows: 24,
             total_cols: 80,
             show_cursor: true,
@@ -393,7 +439,7 @@ mod tests {
                 hint: "",
             },
             scroll_offset: 0,
-            agent_input: Some(("hello", 5)),
+            agent_input: Some(("hello", 5)), agent_status: None,
             total_rows: 24,
             total_cols: 80,
             show_cursor: true,
@@ -419,7 +465,7 @@ mod tests {
                 hint: "",
             },
             scroll_offset: 0,
-            agent_input: None,
+            agent_input: None, agent_status: None,
             total_rows: 10,
             total_cols: 80,
             show_cursor: true,
@@ -442,7 +488,7 @@ mod tests {
                 hint: "",
             },
             scroll_offset: 0,
-            agent_input: None,
+            agent_input: None, agent_status: None,
             total_rows: 24,
             total_cols: 80,
             show_cursor: false,
@@ -465,7 +511,7 @@ mod tests {
                 hint: "",
             },
             scroll_offset: 0,
-            agent_input: Some(("", 0)),
+            agent_input: Some(("", 0)), agent_status: None,
             total_rows: 3,
             total_cols: 40,
             show_cursor: true,

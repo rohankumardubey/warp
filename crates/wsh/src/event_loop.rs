@@ -233,6 +233,10 @@ impl Wsh {
                 Mode::AgentInput { buffer, cursor } => Some((buffer.as_str(), *cursor)),
                 _ => None,
             },
+            agent_status: match &self.mode {
+                Mode::AgentRunning => Some("⠋ thinking..."),
+                _ => None,
+            },
             total_rows: self.rows,
             total_cols: self.cols,
             show_cursor: matches!(self.mode, Mode::Shell),
