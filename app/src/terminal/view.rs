@@ -5696,6 +5696,9 @@ impl TerminalView {
             }
             | BlocklistAIHistoryEvent::UpdatedConversationArtifacts {
                 conversation_id, ..
+            }
+            | BlocklistAIHistoryEvent::UpdatedConversationTitle {
+                conversation_id, ..
             } => history_model.terminal_view_id_for_conversation(conversation_id),
             BlocklistAIHistoryEvent::ReassignedExchange {
                 new_conversation_id,
@@ -5750,6 +5753,7 @@ impl TerminalView {
             && matches!(
                 event,
                 BlocklistAIHistoryEvent::UpdatedConversationStatus { .. }
+                    | BlocklistAIHistoryEvent::UpdatedConversationTitle { .. }
                     | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. }
                     | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
                     | BlocklistAIHistoryEvent::UpdatedStreamingExchange { .. }
@@ -6156,9 +6160,7 @@ impl TerminalView {
                     }
                 }
             }
-            BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. } => {
-                // Conversation title changes flow through metadata updates after
-                // server-confirmed renames, so refresh pane chrome immediately.
+            BlocklistAIHistoryEvent::UpdatedConversationTitle { .. } => {
                 self.update_pane_configuration(ctx);
             }
             BlocklistAIHistoryEvent::ClearedConversationsInTerminalView {
@@ -6239,6 +6241,7 @@ impl TerminalView {
             | BlocklistAIHistoryEvent::UpdatedTodoList { .. }
             | BlocklistAIHistoryEvent::RestoredConversations { .. }
             | BlocklistAIHistoryEvent::UpgradedTask { .. }
+            | BlocklistAIHistoryEvent::UpdatedConversationMetadata { .. }
             | BlocklistAIHistoryEvent::UpdatedConversationArtifacts { .. }
             | BlocklistAIHistoryEvent::ConversationServerTokenAssigned { .. }
             | BlocklistAIHistoryEvent::NewConversationRequestComplete { .. }
