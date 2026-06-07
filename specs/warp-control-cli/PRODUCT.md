@@ -1,6 +1,6 @@
 # Summary
 Warp ships a local control CLI, provisionally named `warpctrl`, that lets agents, developers, and scripts operate running Warp app processes through a typed, allowlisted command surface. `warpctrl` is an Oz-style wrapper script that invokes the existing channel-specific Warp binary in control mode rather than a separate standalone binary.
-The public catalog contains exactly **75 actions** organized around stable user-facing nouns. **72 actions** are default-authorized once the user enables Scripting. **3 destructive close actions** (`window.close`, `tab.close`, `pane.close`) require one-shot in-app confirmation before executing. `block.list` is intentionally absent from the catalog. Input-staging commands place text in the input buffer but never submit it.
+The public catalog contains exactly **75 actions** organized around stable user-facing nouns. All 75 actions are default-authorized once the user enables Scripting. Close actions (`window.close`, `tab.close`, `pane.close`) flow through normal Warp close behavior so existing app warnings for unsaved files, running processes, shared sessions, and similar state remain authoritative. `block.list` is intentionally absent from the catalog. Input-staging commands place text in the input buffer but never submit it.
 All callers are external same-user processes. There is no inside-Warp/outside-Warp distinction, no verified-terminal invocation context, and no authenticated-user identity layer. Security relies on owner-only filesystem discovery, same-user Unix credential broker with kernel peer credentials, short-lived instance-bound exact-action credentials, loopback HTTP transport, and app-side enforcement.
 ## Problem
 Warp has rich interactive actions reachable through UI, keybindings, menus, and deeplinks. Agents can use native tools for files, code, shell commands, and MCP calls, but they cannot reliably operate Warp's own product surfaces: arranging workspaces, focusing panes, opening Warp Drive views, presenting settings, or recovering from ambiguous UI state. Developers cannot compose those actions into shell scripts, demos, or automation workflows, and there is no general local protocol for addressing a specific running Warp instance, window, tab, pane, or session.
@@ -53,13 +53,6 @@ Warp adds a new top-level Settings pane page named **Scripting**. The page conta
 - **Enabled** (default): same-user processes may request exact-action credentials from the broker and send control requests to the loopback listener.
 - **Disabled**: no same-user process can receive local-control credentials. The control listener does not accept requests. Discovery records contain no actionable endpoint.
 The authoritative value is stored in protected local storage (macOS Keychain, or owner-only secure storage on Linux). It is never synced, never appears in `settings.toml` or generated schemas, and cannot be changed by `warpctrl`, config files, or direct protocol requests. Only the Warp app through Settings > Scripting can change it. The default is enabled. Disabling Scripting immediately prevents new credential issuance and invalidates outstanding credentials.
-## One-shot close confirmation
-Three destructive actions require one-shot in-app confirmation before executing:
-- `window.close`
-- `tab.close`
-- `pane.close`
-When the app bridge receives one of these actions, it presents a brief in-app confirmation to the user. The user must approve the close before it executes. If the user dismisses the confirmation, the action fails with `user_confirmation_denied`. If the confirmation times out without a response, the action fails with `user_confirmation_expired`. The confirmation is per-invocation; there is no persistent "always allow" option for close actions.
-All other 72 actions execute immediately once the credential is validated.
 ## Input staging
 The two input commands (`input.insert`, `input.replace`) only stage or edit text in the terminal input buffer. They never submit the buffer, press Enter, or execute a command. There is no `input.run`, `input.get`, `input.clear`, or `input.mode.set` action in the catalog. Terminal command execution is not part of this product surface.
 ## Action catalog
@@ -79,26 +72,26 @@ All default-authorized.
 - `capability.list` — list capabilities supported by the selected instance.
 - `capability.inspect` — metadata for one capability.
 ### Window (5 actions)
-4 default-authorized, 1 one-shot confirmation.
+All default-authorized.
 - `window.list` — list windows in the selected instance.
 - `window.inspect` — metadata for one window.
 - `window.create` — create a new window.
 - `window.focus` — focus a target window.
-- `window.close` — close a target window. **Requires one-shot confirmation.**
+- `window.close` — close a target window. Uses normal Warp close behavior.
 ### Tab (10 actions)
-9 default-authorized, 1 one-shot confirmation.
+All default-authorized.
 - `tab.list` — list tabs in the selected window.
 - `tab.inspect` — metadata for one tab.
 - `tab.create` — create a new terminal tab.
 - `tab.activate` — activate a target tab.
 - `tab.move` — move a tab left or right.
-- `tab.close` — close a target tab. **Requires one-shot confirmation.**
+- `tab.close` — close a target tab. Uses normal Warp close behavior.
 - `tab.rename` — rename a tab.
 - `tab.reset_name` — reset a tab title to the default.
 - `tab.color.set` — set the active-tab color.
 - `tab.color.clear` — clear the active-tab color.
 ### Pane (11 actions)
-10 default-authorized, 1 one-shot confirmation.
+All default-authorized.
 - `pane.list` — list panes in the selected tab.
 - `pane.inspect` — metadata for one pane.
 - `pane.split` — split a pane in a direction (left, right, up, down).
@@ -107,7 +100,7 @@ All default-authorized.
 - `pane.resize` — resize pane dividers in a direction.
 - `pane.maximize` — toggle maximize for a pane.
 - `pane.unmaximize` — restore a maximized pane.
-- `pane.close` — close a target pane. **Requires one-shot confirmation.**
+- `pane.close` — close a target pane. Uses normal Warp close behavior.
 - `pane.rename` — rename a pane.
 - `pane.reset_name` — reset a pane title to the default.
 ### Session (6 actions)
@@ -210,9 +203,6 @@ Every protocol or runtime failure identifies a stable machine-readable error cod
 - `local_control_disabled` — Scripting is disabled.
 - `unauthorized_local_client` — missing, malformed, expired, or invalid credential.
 - `insufficient_permissions` — credential grants a different action.
-- `user_confirmation_required` — action requires one-shot confirmation that has not been presented yet.
-- `user_confirmation_denied` — user declined one-shot close confirmation.
-- `user_confirmation_expired` — one-shot confirmation timed out without a response.
 - `ambiguous_instance` — multiple instances, no unambiguous selection.
 - `ambiguous_target` — multiple matching targets.
 - `stale_target` — explicit target ID no longer exists.

@@ -91,7 +91,7 @@ Use IDs returned by `list`, `inspect`, or `app active` when exact targeting matt
 
 ## Safety and limitations
 
-- Invoke close actions only when the user explicitly asks to close something. `window close`, `tab close`, and `pane close` require one-shot in-app confirmation.
+- Invoke close actions only when the user explicitly asks to close something. Close actions flow through normal Warp close behavior and may trigger existing app warnings.
 - `input insert` and `input replace` only stage text. Warp Control intentionally does not provide an action that submits or runs the input.
 - Do not invent unsupported commands. Use `help`, `action list`, or `action inspect` to discover the allowlisted surface.
 - Warp Control affects only a running local Warp application owned by the same user. It does not control remote or cloud Warp instances.

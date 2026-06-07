@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use ::local_control::auth::{CredentialGrant, CredentialRequest};
 use ::local_control::protocol::{
-    Action, ActionKind, PaneSelector, PaneTarget, TabCloseMode, TabCloseParams, TabSelector,
-    TabTarget, TargetSelector, WindowSelector, WindowTarget,
+    Action, ActionKind, PaneSelector, PaneTarget, TabSelector, TabTarget, TargetSelector,
+    WindowSelector, WindowTarget,
 };
 use ::local_control::{ErrorCode, InstanceId, RequestEnvelope};
 use axum::body::Bytes;
@@ -15,7 +15,6 @@ use settings::Setting as _;
 use warp_core::features::FeatureFlag;
 use warpui::SingletonEntity as _;
 
-use super::bridge::validate_live_close_grant;
 #[cfg(unix)]
 use super::ensure_peer_uid;
 use super::{
@@ -301,32 +300,6 @@ fn bridge_checks_grant_before_action_params() {
 }
 
 #[test]
-fn approved_close_requires_the_original_live_credential_and_action() {
-    let instance_id = InstanceId("inst_test".to_owned());
-    let original = CredentialGrant::new(
-        instance_id.clone(),
-        ActionKind::WindowClose,
-        Duration::minutes(5),
-    );
-    validate_live_close_grant(&original.credential_id, ActionKind::WindowClose, &original)
-        .expect("original live credential should remain valid");
-
-    let replacement =
-        CredentialGrant::new(instance_id, ActionKind::WindowClose, Duration::minutes(5));
-    let err = validate_live_close_grant(
-        &original.credential_id,
-        ActionKind::WindowClose,
-        &replacement,
-    )
-    .expect_err("replacement credential should be rejected");
-    assert_eq!(err.code, ErrorCode::UnauthorizedLocalClient);
-
-    let err = validate_live_close_grant(&original.credential_id, ActionKind::TabClose, &original)
-        .expect_err("different approved action should be rejected");
-    assert_eq!(err.code, ErrorCode::UnauthorizedLocalClient);
-}
-
-#[test]
 fn credential_insertion_prunes_expired_and_caps_active_grants() {
     let mut credentials = HashMap::new();
     let instance_id = InstanceId("inst_test".to_owned());
@@ -386,60 +359,6 @@ fn expired_credential_is_rejected_and_pruned_before_request_decode() {
     .expect_err("expired grant is rejected");
     assert_eq!(err.code, ErrorCode::UnauthorizedLocalClient);
     assert!(!credentials.contains_key(token.secret()));
-}
-
-#[test]
-fn close_actions_return_confirmation_required_via_bridge() {
-    let _flag = FeatureFlag::WarpControlCli.override_enabled(true);
-    warpui::App::test((), |mut app| async move {
-        crate::test_util::settings::initialize_settings_for_tests(&mut app);
-        app.update(|ctx| {
-            LocalControlSettings::handle(ctx).update(ctx, |settings, ctx| {
-                settings
-                    .local_control_mode
-                    .set_value(LocalControlMode::Enabled, ctx)
-            })
-        })
-        .expect("local control should enable");
-
-        let instance_id = InstanceId("inst_test".to_owned());
-        let bridge = app.add_singleton_model(LocalControlBridge::new);
-        bridge.update(&mut app, |bridge, _| {
-            bridge.set_instance_id(instance_id.clone());
-        });
-
-        for action in [
-            ActionKind::WindowClose,
-            ActionKind::TabClose,
-            ActionKind::PaneClose,
-        ] {
-            let grant = CredentialGrant::new(instance_id.clone(), action, Duration::minutes(5));
-            let request_action = if action == ActionKind::TabClose {
-                Action::with_params(
-                    action,
-                    TabCloseParams {
-                        mode: TabCloseMode::Target,
-                    },
-                )
-                .expect("tab close params should serialize")
-            } else {
-                Action::new(action)
-            };
-            let request = RequestEnvelope::new(request_action);
-            let response = bridge.update(&mut app, |bridge, ctx| {
-                bridge.handle_request(request, grant, ctx)
-            });
-            match &response.response {
-                ::local_control::ControlResponse::Error { error } => {
-                    assert_eq!(error.code, ErrorCode::UserConfirmationRequired);
-                }
-                other => panic!(
-                    "expected UserConfirmationRequired for {}, got {other:?}",
-                    action.as_str()
-                ),
-            }
-        }
-    });
 }
 
 #[test]

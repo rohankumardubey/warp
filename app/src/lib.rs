@@ -941,25 +941,15 @@ fn run_internal(mut launch_mode: LaunchMode) -> Result<()> {
     let pty_spawner =
         terminal::local_tty::spawner::PtySpawner::new().context("Failed to create pty spawner")?;
 
-    let local_control_launch_supported = matches!(
-        &launch_mode,
-        LaunchMode::App { .. } | LaunchMode::Test { .. }
-    );
     let mut app_builder = if launch_mode.is_headless() {
         warpui::platform::AppBuilder::new_headless(
-            app_callbacks(
-                launch_mode.is_integration_test(),
-                local_control_launch_supported,
-            ),
+            app_callbacks(launch_mode.is_integration_test()),
             Box::new(ASSETS),
             launch_mode.take_test_driver(),
         )
     } else {
         warpui::platform::AppBuilder::new(
-            app_callbacks(
-                launch_mode.is_integration_test(),
-                local_control_launch_supported,
-            ),
+            app_callbacks(launch_mode.is_integration_test()),
             Box::new(ASSETS),
             launch_mode.take_test_driver(),
         )
@@ -2091,10 +2081,7 @@ pub(crate) fn initialize_app(
     app_state
 }
 
-pub(crate) fn app_callbacks(
-    is_integration_test: bool,
-    local_control_launch_supported: bool,
-) -> warpui::platform::AppCallbacks {
+pub(crate) fn app_callbacks(is_integration_test: bool) -> warpui::platform::AppCallbacks {
     warpui::platform::AppCallbacks {
         on_internet_reachability_changed: Some(Box::new(move |reachable, ctx| {
             NetworkStatus::handle(ctx)
@@ -2162,12 +2149,6 @@ pub(crate) fn app_callbacks(
             );
         })),
         on_will_terminate: Some(Box::new(move |ctx| {
-            #[cfg(not(target_family = "wasm"))]
-            if local_control_launch_supported && FeatureFlag::WarpControlCli.is_enabled() {
-                local_control::LocalControlBridge::handle(ctx).update(ctx, |bridge, ctx| {
-                    bridge.cancel_all_confirmations(ctx);
-                });
-            }
             NotebookManager::handle(ctx).update(ctx, |manager, ctx| {
                 // Notebooks are only saved periodically, so ensure that any pending changes have
                 // been sent to the writer thread before terminating.

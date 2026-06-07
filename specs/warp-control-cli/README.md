@@ -1,6 +1,6 @@
 # warpctrl operator README
 `warpctrl` is the provisional CLI entrypoint for controlling an already-running local Warp app instance. It is intended for scripts, demos, agent workflows, and developer automation that need to perform allowlisted Warp UI actions through the installed channel-specific Warp binary without launching the GUI.
-The implemented command surface contains exactly 75 typed, allowlisted actions. Seventy-two actions execute after exact-action credential validation; `window.close`, `tab.close`, and `pane.close` additionally require one-shot in-app confirmation. The Block, Auth, Drive, and History families are absent, and `input.insert` plus `input.replace` stage text without submitting it.
+The implemented command surface contains exactly 75 typed, allowlisted actions. All 75 actions execute after exact-action credential validation. Close actions (`window.close`, `tab.close`, `pane.close`) flow through normal Warp close behavior so existing app warnings remain authoritative. The Block, Auth, Drive, and History families are absent, and `input.insert` plus `input.replace` stage text without submitting it.
 ## Packaging model
 `warpctrl` should be packaged as an Oz-style wrapper script rather than a standalone Rust binary. The wrapper should resolve the installed channel-specific Warp executable and invoke it with the hidden `--warpctrl` control-mode flag:
 - `crates/local_control` owns discovery records, local authentication material, client transport, protocol envelopes, action names, and error types.
@@ -99,11 +99,11 @@ sequenceDiagram
 ```
 **Known limitations and future hardening:**
 - Windows local-control publication is disabled until discovery-record ACL creation and validation are implemented.
-- Non-close actions may reuse an unexpired exact-action credential. Close approval is bound to one exact request, credential identity, resolved target, and one-shot continuation.
+- Unexpired exact-action credentials may be reused for their granted action. Close actions flow through normal Warp close behavior and may trigger existing app warnings.
 - Same-user malicious software can still invoke trusted wrappers or automate the desktop, so brokered credentials are least-privilege guardrails rather than a complete hostile same-user sandbox.
 - Future catalog expansion should consider per-request nonces, stricter platform secure-storage constraints, and stronger approval or policy gates.
 ## Documentation review notes
 - Treat `warpctrl` as provisional executable naming until packaging signs off on final artifact aliases.
-- Keep examples scoped to the authoritative 75-action catalog and explicitly call out the three confirmation-required close actions.
+- Keep examples scoped to the authoritative 75-action catalog.
 - Do not document excluded families or actions as usable just because internal app implementations exist.
 - Windows packaging may initially follow the existing helper-wrapper pattern. Update this README when that decision is final.

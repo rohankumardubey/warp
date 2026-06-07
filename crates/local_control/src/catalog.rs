@@ -82,7 +82,6 @@ pub struct ActionMetadata {
     pub kind: ActionKind,
     pub name: String,
     pub implementation_status: ActionImplementationStatus,
-    pub requires_user_confirmation: bool,
     pub target_scope: TargetScope,
     pub parameter_spec: ActionParameterSpec,
     pub result_spec: ActionResultSpec,
@@ -92,7 +91,6 @@ pub struct ActionMetadata {
 struct ActionSpec {
     name: &'static str,
     implementation_status: ActionImplementationStatus,
-    requires_user_confirmation: bool,
     target_scope: TargetScope,
     parameter_spec: ActionParameterSpec,
     result_spec: ActionResultSpec,
@@ -105,7 +103,6 @@ macro_rules! define_action_catalog {
                 $variant:ident => {
                     name: $name:literal,
                     status: $status:ident,
-                    confirmation: $confirmation:literal,
                     target: $target:ident,
                     params: $params:ident,
                     result: $result:ident $(,)?
@@ -132,7 +129,6 @@ macro_rules! define_action_catalog {
                     kind: self,
                     name: spec.name.to_owned(),
                     implementation_status: spec.implementation_status,
-                    requires_user_confirmation: spec.requires_user_confirmation,
                     target_scope: spec.target_scope,
                     parameter_spec: spec.parameter_spec,
                     result_spec: spec.result_spec,
@@ -157,7 +153,6 @@ macro_rules! define_action_catalog {
                     $($(Self::$variant => ActionSpec {
                         name: $name,
                         implementation_status: ActionImplementationStatus::$status,
-                        requires_user_confirmation: $confirmation,
                         target_scope: TargetScope::$target,
                         parameter_spec: ActionParameterSpec::$params,
                         result_spec: ActionResultSpec::$result,
@@ -170,122 +165,122 @@ macro_rules! define_action_catalog {
 
 define_action_catalog! {
     instance {
-        InstanceList => { name: "instance.list", status: Implemented, confirmation: false, target: Instance, params: None, result: InstanceList },
-        InstanceInspect => { name: "instance.inspect", status: Implemented, confirmation: false, target: Instance, params: None, result: InstanceMetadata },
+        InstanceList => { name: "instance.list", status: Implemented, target: Instance, params: None, result: InstanceList },
+        InstanceInspect => { name: "instance.inspect", status: Implemented, target: Instance, params: None, result: InstanceMetadata },
     }
 
     app {
-        AppPing => { name: "app.ping", status: Implemented, confirmation: false, target: Instance, params: None, result: InstanceMetadata },
-        AppVersion => { name: "app.version", status: Implemented, confirmation: false, target: Instance, params: None, result: InstanceMetadata },
-        AppActive => { name: "app.active", status: Implemented, confirmation: false, target: Instance, params: None, result: ActiveTarget },
-        AppFocus => { name: "app.focus", status: Implemented, confirmation: false, target: Instance, params: None, result: Acknowledgement },
+        AppPing => { name: "app.ping", status: Implemented, target: Instance, params: None, result: InstanceMetadata },
+        AppVersion => { name: "app.version", status: Implemented, target: Instance, params: None, result: InstanceMetadata },
+        AppActive => { name: "app.active", status: Implemented, target: Instance, params: None, result: ActiveTarget },
+        AppFocus => { name: "app.focus", status: Implemented, target: Instance, params: None, result: Acknowledgement },
     }
 
     capability {
-        CapabilityList => { name: "capability.list", status: Implemented, confirmation: false, target: Capability, params: None, result: CapabilityList },
-        CapabilityInspect => { name: "capability.inspect", status: Implemented, confirmation: false, target: Capability, params: ActionName, result: CapabilityMetadata },
+        CapabilityList => { name: "capability.list", status: Implemented, target: Capability, params: None, result: CapabilityList },
+        CapabilityInspect => { name: "capability.inspect", status: Implemented, target: Capability, params: ActionName, result: CapabilityMetadata },
     }
 
     window {
-        WindowList => { name: "window.list", status: Implemented, confirmation: false, target: Window, params: None, result: TargetList },
-        WindowInspect => { name: "window.inspect", status: Implemented, confirmation: false, target: Window, params: None, result: TargetMetadata },
-        WindowCreate => { name: "window.create", status: Implemented, confirmation: false, target: Window, params: TabCreate, result: Acknowledgement },
-        WindowFocus => { name: "window.focus", status: Implemented, confirmation: false, target: Window, params: None, result: Acknowledgement },
-        WindowClose => { name: "window.close", status: Implemented, confirmation: true, target: Window, params: None, result: Acknowledgement },
+        WindowList => { name: "window.list", status: Implemented, target: Window, params: None, result: TargetList },
+        WindowInspect => { name: "window.inspect", status: Implemented, target: Window, params: None, result: TargetMetadata },
+        WindowCreate => { name: "window.create", status: Implemented, target: Window, params: TabCreate, result: Acknowledgement },
+        WindowFocus => { name: "window.focus", status: Implemented, target: Window, params: None, result: Acknowledgement },
+        WindowClose => { name: "window.close", status: Implemented, target: Window, params: None, result: Acknowledgement },
     }
 
     tab {
-        TabList => { name: "tab.list", status: Implemented, confirmation: false, target: Tab, params: None, result: TargetList },
-        TabInspect => { name: "tab.inspect", status: Implemented, confirmation: false, target: Tab, params: None, result: TargetMetadata },
-        TabCreate => { name: "tab.create", status: Implemented, confirmation: false, target: Tab, params: TabCreate, result: Acknowledgement },
-        TabActivate => { name: "tab.activate", status: Implemented, confirmation: false, target: Tab, params: TabActivate, result: Acknowledgement },
-        TabMove => { name: "tab.move", status: Implemented, confirmation: false, target: Tab, params: Direction, result: Acknowledgement },
-        TabClose => { name: "tab.close", status: Implemented, confirmation: true, target: Tab, params: TabClose, result: Acknowledgement },
-        TabRename => { name: "tab.rename", status: Implemented, confirmation: false, target: Tab, params: Rename, result: Acknowledgement },
-        TabResetName => { name: "tab.reset_name", status: Implemented, confirmation: false, target: Tab, params: None, result: Acknowledgement },
-        TabColorSet => { name: "tab.color.set", status: Implemented, confirmation: false, target: Tab, params: ColorValue, result: Acknowledgement },
-        TabColorClear => { name: "tab.color.clear", status: Implemented, confirmation: false, target: Tab, params: None, result: Acknowledgement },
+        TabList => { name: "tab.list", status: Implemented, target: Tab, params: None, result: TargetList },
+        TabInspect => { name: "tab.inspect", status: Implemented, target: Tab, params: None, result: TargetMetadata },
+        TabCreate => { name: "tab.create", status: Implemented, target: Tab, params: TabCreate, result: Acknowledgement },
+        TabActivate => { name: "tab.activate", status: Implemented, target: Tab, params: TabActivate, result: Acknowledgement },
+        TabMove => { name: "tab.move", status: Implemented, target: Tab, params: Direction, result: Acknowledgement },
+        TabClose => { name: "tab.close", status: Implemented, target: Tab, params: TabClose, result: Acknowledgement },
+        TabRename => { name: "tab.rename", status: Implemented, target: Tab, params: Rename, result: Acknowledgement },
+        TabResetName => { name: "tab.reset_name", status: Implemented, target: Tab, params: None, result: Acknowledgement },
+        TabColorSet => { name: "tab.color.set", status: Implemented, target: Tab, params: ColorValue, result: Acknowledgement },
+        TabColorClear => { name: "tab.color.clear", status: Implemented, target: Tab, params: None, result: Acknowledgement },
     }
 
     pane {
-        PaneList => { name: "pane.list", status: Implemented, confirmation: false, target: Pane, params: None, result: TargetList },
-        PaneInspect => { name: "pane.inspect", status: Implemented, confirmation: false, target: Pane, params: None, result: TargetMetadata },
-        PaneSplit => { name: "pane.split", status: Implemented, confirmation: false, target: Pane, params: Direction, result: Acknowledgement },
-        PaneFocus => { name: "pane.focus", status: Implemented, confirmation: false, target: Pane, params: None, result: Acknowledgement },
-        PaneNavigate => { name: "pane.navigate", status: Implemented, confirmation: false, target: Pane, params: Direction, result: Acknowledgement },
-        PaneResize => { name: "pane.resize", status: Implemented, confirmation: false, target: Pane, params: Resize, result: Acknowledgement },
-        PaneMaximize => { name: "pane.maximize", status: Implemented, confirmation: false, target: Pane, params: None, result: Acknowledgement },
-        PaneUnmaximize => { name: "pane.unmaximize", status: Implemented, confirmation: false, target: Pane, params: None, result: Acknowledgement },
-        PaneClose => { name: "pane.close", status: Implemented, confirmation: true, target: Pane, params: None, result: Acknowledgement },
-        PaneRename => { name: "pane.rename", status: Implemented, confirmation: false, target: Pane, params: Rename, result: Acknowledgement },
-        PaneResetName => { name: "pane.reset_name", status: Implemented, confirmation: false, target: Pane, params: None, result: Acknowledgement },
+        PaneList => { name: "pane.list", status: Implemented, target: Pane, params: None, result: TargetList },
+        PaneInspect => { name: "pane.inspect", status: Implemented, target: Pane, params: None, result: TargetMetadata },
+        PaneSplit => { name: "pane.split", status: Implemented, target: Pane, params: Direction, result: Acknowledgement },
+        PaneFocus => { name: "pane.focus", status: Implemented, target: Pane, params: None, result: Acknowledgement },
+        PaneNavigate => { name: "pane.navigate", status: Implemented, target: Pane, params: Direction, result: Acknowledgement },
+        PaneResize => { name: "pane.resize", status: Implemented, target: Pane, params: Resize, result: Acknowledgement },
+        PaneMaximize => { name: "pane.maximize", status: Implemented, target: Pane, params: None, result: Acknowledgement },
+        PaneUnmaximize => { name: "pane.unmaximize", status: Implemented, target: Pane, params: None, result: Acknowledgement },
+        PaneClose => { name: "pane.close", status: Implemented, target: Pane, params: None, result: Acknowledgement },
+        PaneRename => { name: "pane.rename", status: Implemented, target: Pane, params: Rename, result: Acknowledgement },
+        PaneResetName => { name: "pane.reset_name", status: Implemented, target: Pane, params: None, result: Acknowledgement },
     }
 
     session {
-        SessionList => { name: "session.list", status: Implemented, confirmation: false, target: Session, params: None, result: TargetList },
-        SessionInspect => { name: "session.inspect", status: Implemented, confirmation: false, target: Session, params: None, result: TargetMetadata },
-        SessionActivate => { name: "session.activate", status: Implemented, confirmation: false, target: Session, params: None, result: Acknowledgement },
-        SessionPrevious => { name: "session.previous", status: Implemented, confirmation: false, target: Session, params: None, result: Acknowledgement },
-        SessionNext => { name: "session.next", status: Implemented, confirmation: false, target: Session, params: None, result: Acknowledgement },
-        SessionReopenClosed => { name: "session.reopen_closed", status: Implemented, confirmation: false, target: Session, params: None, result: Acknowledgement },
+        SessionList => { name: "session.list", status: Implemented, target: Session, params: None, result: TargetList },
+        SessionInspect => { name: "session.inspect", status: Implemented, target: Session, params: None, result: TargetMetadata },
+        SessionActivate => { name: "session.activate", status: Implemented, target: Session, params: None, result: Acknowledgement },
+        SessionPrevious => { name: "session.previous", status: Implemented, target: Session, params: None, result: Acknowledgement },
+        SessionNext => { name: "session.next", status: Implemented, target: Session, params: None, result: Acknowledgement },
+        SessionReopenClosed => { name: "session.reopen_closed", status: Implemented, target: Session, params: None, result: Acknowledgement },
     }
 
     input {
-        InputInsert => { name: "input.insert", status: Implemented, confirmation: false, target: Input, params: Text, result: Acknowledgement },
-        InputReplace => { name: "input.replace", status: Implemented, confirmation: false, target: Input, params: Text, result: Acknowledgement },
+        InputInsert => { name: "input.insert", status: Implemented, target: Input, params: Text, result: Acknowledgement },
+        InputReplace => { name: "input.replace", status: Implemented, target: Input, params: Text, result: Acknowledgement },
     }
 
     theme {
-        ThemeList => { name: "theme.list", status: Implemented, confirmation: false, target: Appearance, params: None, result: ThemeList },
-        ThemeGet => { name: "theme.get", status: Implemented, confirmation: false, target: Appearance, params: None, result: ThemeState },
-        ThemeSet => { name: "theme.set", status: Implemented, confirmation: false, target: Appearance, params: ThemeName, result: Acknowledgement },
-        ThemeSystemSet => { name: "theme.system.set", status: Implemented, confirmation: false, target: Appearance, params: BooleanValue, result: Acknowledgement },
-        ThemeLightSet => { name: "theme.light.set", status: Implemented, confirmation: false, target: Appearance, params: ThemeName, result: Acknowledgement },
-        ThemeDarkSet => { name: "theme.dark.set", status: Implemented, confirmation: false, target: Appearance, params: ThemeName, result: Acknowledgement },
+        ThemeList => { name: "theme.list", status: Implemented, target: Appearance, params: None, result: ThemeList },
+        ThemeGet => { name: "theme.get", status: Implemented, target: Appearance, params: None, result: ThemeState },
+        ThemeSet => { name: "theme.set", status: Implemented, target: Appearance, params: ThemeName, result: Acknowledgement },
+        ThemeSystemSet => { name: "theme.system.set", status: Implemented, target: Appearance, params: BooleanValue, result: Acknowledgement },
+        ThemeLightSet => { name: "theme.light.set", status: Implemented, target: Appearance, params: ThemeName, result: Acknowledgement },
+        ThemeDarkSet => { name: "theme.dark.set", status: Implemented, target: Appearance, params: ThemeName, result: Acknowledgement },
     }
 
     appearance {
-        AppearanceGet => { name: "appearance.get", status: Implemented, confirmation: false, target: Appearance, params: None, result: AppearanceState },
-        AppearanceFontSizeIncrease => { name: "appearance.font_size.increase", status: Implemented, confirmation: false, target: Appearance, params: None, result: Acknowledgement },
-        AppearanceFontSizeDecrease => { name: "appearance.font_size.decrease", status: Implemented, confirmation: false, target: Appearance, params: None, result: Acknowledgement },
-        AppearanceFontSizeReset => { name: "appearance.font_size.reset", status: Implemented, confirmation: false, target: Appearance, params: None, result: Acknowledgement },
-        AppearanceZoomIncrease => { name: "appearance.zoom.increase", status: Implemented, confirmation: false, target: Appearance, params: None, result: Acknowledgement },
-        AppearanceZoomDecrease => { name: "appearance.zoom.decrease", status: Implemented, confirmation: false, target: Appearance, params: None, result: Acknowledgement },
-        AppearanceZoomReset => { name: "appearance.zoom.reset", status: Implemented, confirmation: false, target: Appearance, params: None, result: Acknowledgement },
+        AppearanceGet => { name: "appearance.get", status: Implemented, target: Appearance, params: None, result: AppearanceState },
+        AppearanceFontSizeIncrease => { name: "appearance.font_size.increase", status: Implemented, target: Appearance, params: None, result: Acknowledgement },
+        AppearanceFontSizeDecrease => { name: "appearance.font_size.decrease", status: Implemented, target: Appearance, params: None, result: Acknowledgement },
+        AppearanceFontSizeReset => { name: "appearance.font_size.reset", status: Implemented, target: Appearance, params: None, result: Acknowledgement },
+        AppearanceZoomIncrease => { name: "appearance.zoom.increase", status: Implemented, target: Appearance, params: None, result: Acknowledgement },
+        AppearanceZoomDecrease => { name: "appearance.zoom.decrease", status: Implemented, target: Appearance, params: None, result: Acknowledgement },
+        AppearanceZoomReset => { name: "appearance.zoom.reset", status: Implemented, target: Appearance, params: None, result: Acknowledgement },
     }
 
     setting {
-        SettingList => { name: "setting.list", status: Implemented, confirmation: false, target: Settings, params: Namespace, result: SettingList },
-        SettingGet => { name: "setting.get", status: Implemented, confirmation: false, target: Settings, params: Key, result: SettingValue },
-        SettingSet => { name: "setting.set", status: Implemented, confirmation: false, target: Settings, params: KeyValue, result: Acknowledgement },
-        SettingToggle => { name: "setting.toggle", status: Implemented, confirmation: false, target: Settings, params: Key, result: Acknowledgement },
+        SettingList => { name: "setting.list", status: Implemented, target: Settings, params: Namespace, result: SettingList },
+        SettingGet => { name: "setting.get", status: Implemented, target: Settings, params: Key, result: SettingValue },
+        SettingSet => { name: "setting.set", status: Implemented, target: Settings, params: KeyValue, result: Acknowledgement },
+        SettingToggle => { name: "setting.toggle", status: Implemented, target: Settings, params: Key, result: Acknowledgement },
     }
 
     keybinding {
-        KeybindingList => { name: "keybinding.list", status: Implemented, confirmation: false, target: Keybinding, params: None, result: KeybindingList },
-        KeybindingGet => { name: "keybinding.get", status: Implemented, confirmation: false, target: Keybinding, params: BindingName, result: KeybindingMetadata },
+        KeybindingList => { name: "keybinding.list", status: Implemented, target: Keybinding, params: None, result: KeybindingList },
+        KeybindingGet => { name: "keybinding.get", status: Implemented, target: Keybinding, params: BindingName, result: KeybindingMetadata },
     }
 
     action {
-        ActionList => { name: "action.list", status: Implemented, confirmation: false, target: Action, params: None, result: CapabilityList },
-        ActionInspect => { name: "action.inspect", status: Implemented, confirmation: false, target: Action, params: ActionName, result: CapabilityMetadata },
+        ActionList => { name: "action.list", status: Implemented, target: Action, params: None, result: CapabilityList },
+        ActionInspect => { name: "action.inspect", status: Implemented, target: Action, params: ActionName, result: CapabilityMetadata },
     }
 
     surface {
-        SurfaceSettingsOpen => { name: "surface.settings.open", status: Implemented, confirmation: false, target: Surface, params: PageQuery, result: Acknowledgement },
-        SurfaceCommandPaletteOpen => { name: "surface.command_palette.open", status: Implemented, confirmation: false, target: Surface, params: Query, result: Acknowledgement },
-        SurfaceCommandSearchOpen => { name: "surface.command_search.open", status: Implemented, confirmation: false, target: Surface, params: Query, result: Acknowledgement },
-        SurfaceWarpDriveOpen => { name: "surface.warp_drive.open", status: Implemented, confirmation: false, target: Surface, params: None, result: Acknowledgement },
-        SurfaceWarpDriveToggle => { name: "surface.warp_drive.toggle", status: Implemented, confirmation: false, target: Surface, params: None, result: Acknowledgement },
-        SurfaceResourceCenterToggle => { name: "surface.resource_center.toggle", status: Implemented, confirmation: false, target: Surface, params: None, result: Acknowledgement },
-        SurfaceAiAssistantToggle => { name: "surface.ai_assistant.toggle", status: Implemented, confirmation: false, target: Surface, params: None, result: Acknowledgement },
-        SurfaceCodeReviewToggle => { name: "surface.code_review.toggle", status: Implemented, confirmation: false, target: Surface, params: None, result: Acknowledgement },
-        SurfaceLeftPanelToggle => { name: "surface.left_panel.toggle", status: Implemented, confirmation: false, target: Surface, params: None, result: Acknowledgement },
-        SurfaceRightPanelToggle => { name: "surface.right_panel.toggle", status: Implemented, confirmation: false, target: Surface, params: None, result: Acknowledgement },
-        SurfaceVerticalTabsToggle => { name: "surface.vertical_tabs.toggle", status: Implemented, confirmation: false, target: Surface, params: None, result: Acknowledgement },
+        SurfaceSettingsOpen => { name: "surface.settings.open", status: Implemented, target: Surface, params: PageQuery, result: Acknowledgement },
+        SurfaceCommandPaletteOpen => { name: "surface.command_palette.open", status: Implemented, target: Surface, params: Query, result: Acknowledgement },
+        SurfaceCommandSearchOpen => { name: "surface.command_search.open", status: Implemented, target: Surface, params: Query, result: Acknowledgement },
+        SurfaceWarpDriveOpen => { name: "surface.warp_drive.open", status: Implemented, target: Surface, params: None, result: Acknowledgement },
+        SurfaceWarpDriveToggle => { name: "surface.warp_drive.toggle", status: Implemented, target: Surface, params: None, result: Acknowledgement },
+        SurfaceResourceCenterToggle => { name: "surface.resource_center.toggle", status: Implemented, target: Surface, params: None, result: Acknowledgement },
+        SurfaceAiAssistantToggle => { name: "surface.ai_assistant.toggle", status: Implemented, target: Surface, params: None, result: Acknowledgement },
+        SurfaceCodeReviewToggle => { name: "surface.code_review.toggle", status: Implemented, target: Surface, params: None, result: Acknowledgement },
+        SurfaceLeftPanelToggle => { name: "surface.left_panel.toggle", status: Implemented, target: Surface, params: None, result: Acknowledgement },
+        SurfaceRightPanelToggle => { name: "surface.right_panel.toggle", status: Implemented, target: Surface, params: None, result: Acknowledgement },
+        SurfaceVerticalTabsToggle => { name: "surface.vertical_tabs.toggle", status: Implemented, target: Surface, params: None, result: Acknowledgement },
     }
 
     file {
-        FileOpen => { name: "file.open", status: Implemented, confirmation: false, target: File, params: FileOpen, result: Acknowledgement },
+        FileOpen => { name: "file.open", status: Implemented, target: File, params: FileOpen, result: Acknowledgement },
     }
 }
