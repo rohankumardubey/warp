@@ -177,6 +177,8 @@ When disabled:
 When enabled:
 - Settings > Scripting page is rendered.
 - All local-control infrastructure starts when Scripting is enabled (the default).
+- `resources/bundled/skills/warpctrl/SKILL.md` teaches the built-in agent and users how to discover and invoke the allowlisted CLI surface.
+- The skill manager maps the `warpctrl` bundled skill to `FeatureFlag::WarpControlCli` through `BundledSkillActivation`. Both skill listing and direct bundled-skill reads enforce the activation state.
 ### 11. First slice: discovery + `tab.create`
 The first implementation slice proves the end-to-end architecture:
 - Shared protocol types and error envelopes.
@@ -242,6 +244,7 @@ sequenceDiagram
 - **Excluded families:** The Block, Auth, Drive, and History families are entirely absent. Requesting any of them returns `not_allowlisted`.
 - **Unsupported platforms:** Windows fails closed with no fallback.
 - **Action count:** Tests verify the catalog contains exactly 75 actions, 72 default-authorized, 3 requiring confirmation.
+- **Bundled skill gate:** Tests verify the `warpctrl` bundled skill is discoverable and readable only while `FeatureFlag::WarpControlCli` is enabled, without affecting unrelated bundled skills.
 ## Risks and mitigations
 - **Same-user residual risk:** The broker authenticates the OS user, not the calling application. Any process running as the same user can request credentials. Mitigated by: protected enablement, short expiry, exact-action grants, app-side revalidation, one-shot confirmation for destructive actions.
 - **Browser-to-localhost:** Mitigated by: no permissive CORS, Origin header rejection, Host header validation, credential requirement.

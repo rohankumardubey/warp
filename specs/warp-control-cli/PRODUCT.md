@@ -45,6 +45,9 @@ Warp has rich interactive actions reachable through UI, keybindings, menus, and 
 11. When a command omits lower-level selectors, it resolves them from the higher-level context using active defaults.
 12. When an explicitly supplied target disappears between discovery and execution, the request fails with `stale_target`. The CLI never silently chooses a different target.
 13. The protocol is command-oriented: each action has a named command, validated parameters, and defined target scope.
+## Bundled agent skill
+When Warp Control and bundled skills are enabled, Warp exposes a built-in `warpctrl` skill to the Warp agent. The skill tells the agent when to use Warp Control for actions that affect Warp itself, teaches a discovery-first targeting workflow, and documents the same manual commands available to users.
+The skill is unavailable when the `WarpControlCli` feature flag is disabled. Disabled skills are omitted from agent skill discovery and cannot be read through a stale direct skill reference.
 ## Scripting setting
 Warp adds a new top-level Settings pane page named **Scripting**. The page contains a single toggle for local control:
 - **Enabled** (default): same-user processes may request exact-action credentials from the broker and send control requests to the loopback listener.

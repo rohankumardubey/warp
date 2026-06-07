@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
+use std::path::Path;
 
 use ai::skills::{get_provider_for_path, ParsedSkill, SkillProvider, SkillReference, SkillScope};
 use repo_metadata::repositories::DetectedRepositories;
@@ -654,6 +655,85 @@ fn get_skills_for_working_directory_respects_location() {
     });
 }
 
+#[test]
+fn feature_gated_bundled_skill_is_listed_only_when_enabled() {
+    App::test((), |mut app| async move {
+        app.add_singleton_model(DirectoryWatcher::new);
+        app.add_singleton_model(AISettings::new_with_defaults);
+        app.add_singleton_model(|_| DetectedRepositories::default());
+        app.add_singleton_model(RepoMetadataModel::new);
+        app.add_singleton_model(HomeDirectoryWatcher::new_for_test);
+        app.add_singleton_model(WarpManagedPathsWatcher::new_for_testing);
+        let handle = app.add_singleton_model(SkillManager::new);
+        let _bundled_skills = FeatureFlag::BundledSkills.override_enabled(true);
+        let warp_control_cli = FeatureFlag::WarpControlCli.override_enabled(false);
+
+        handle.update(&mut app, |manager, _| {
+            manager.add_bundled_skill_for_testing(
+                "warpctrl",
+                ParsedSkill {
+                    name: "warpctrl".to_owned(),
+                    description: "Control Warp".to_owned(),
+                    path: LocalOrRemotePath::Local("/bundled/skills/warpctrl/SKILL.md".into()),
+                    content: "# warpctrl".to_owned(),
+                    line_range: None,
+                    provider: SkillProvider::Warp,
+                    scope: SkillScope::Bundled,
+                },
+                BundledSkillActivation::RequiresFeature(FeatureFlag::WarpControlCli),
+            );
+            manager.add_bundled_skill_for_testing(
+                "always",
+                ParsedSkill {
+                    name: "always".to_owned(),
+                    description: "Always available".to_owned(),
+                    path: LocalOrRemotePath::Local("/bundled/skills/always/SKILL.md".into()),
+                    content: "# always".to_owned(),
+                    line_range: None,
+                    provider: SkillProvider::Warp,
+                    scope: SkillScope::Bundled,
+                },
+                BundledSkillActivation::Always,
+            );
+        });
+
+        let disabled_names = handle.read(&app, |manager, ctx| {
+            manager
+                .get_skills_for_working_directory(None, ctx)
+                .into_iter()
+                .map(|skill| skill.name)
+                .collect::<HashSet<_>>()
+        });
+        assert!(!disabled_names.contains("warpctrl"));
+        assert!(disabled_names.contains("always"));
+
+        drop(warp_control_cli);
+        let _warp_control_cli = FeatureFlag::WarpControlCli.override_enabled(true);
+        let enabled_names = handle.read(&app, |manager, ctx| {
+            manager
+                .get_skills_for_working_directory(None, ctx)
+                .into_iter()
+                .map(|skill| skill.name)
+                .collect::<HashSet<_>>()
+        });
+        assert!(enabled_names.contains("warpctrl"));
+        assert!(enabled_names.contains("always"));
+    });
+}
+
+#[test]
+fn warpctrl_bundled_skill_activation_tracks_warp_control_feature() {
+    App::test((), |app| async move {
+        let settings = app.add_singleton_model(AISettings::new_with_defaults);
+        let warp_control_cli = FeatureFlag::WarpControlCli.override_enabled(false);
+        let activation = activation_for_bundled_skill("warpctrl", Path::new("/resources"));
+        assert!(!settings.read(&app, |_, ctx| activation.is_enabled(ctx)));
+
+        drop(warp_control_cli);
+        let _warp_control_cli = FeatureFlag::WarpControlCli.override_enabled(true);
+        assert!(settings.read(&app, |_, ctx| activation.is_enabled(ctx)));
+    });
+}
 #[test]
 fn active_skill_by_reference_resolves_exact_remote_identity() {
     let remote_skill = make_remote_skill(&HostId::new("remote-host".to_string()), "deploy");

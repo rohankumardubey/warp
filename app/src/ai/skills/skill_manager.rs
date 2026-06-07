@@ -25,6 +25,8 @@ use crate::settings::user_preferences_toml_file_path;
 pub enum BundledSkillActivation {
     /// Always active.
     Always,
+    /// Active only when a specific Warp feature is enabled.
+    RequiresFeature(FeatureFlag),
     /// Active only when a specific MCP server is running.
     RequiresMcp(McpIntegration),
     /// Active only when a specific file exists on disk.
@@ -35,6 +37,7 @@ impl BundledSkillActivation {
     pub fn is_enabled(&self, ctx: &AppContext) -> bool {
         match self {
             Self::Always => true,
+            Self::RequiresFeature(feature) => feature.is_enabled(),
             Self::RequiresMcp(integration) => {
                 TemplatableMCPServerManager::as_ref(ctx).is_mcp_server_running(*integration)
             }
@@ -644,13 +647,14 @@ fn icon_for_bundled_skill(skill_id: &str) -> Icon {
 
 /// Returns the activation condition for a bundled skill.
 ///
-/// Most skills are always active. Skills that depend on a bundled resource
-/// file use `RequiresFile` so they only appear when the resource is present.
+/// Most skills are always active. Other skills appear only when their required
+/// feature, integration, or bundled resource is available.
 fn activation_for_bundled_skill(skill_id: &str, resources_dir: &Path) -> BundledSkillActivation {
     match skill_id {
         "modify-settings" => {
             BundledSkillActivation::RequiresFile(resources_dir.join("settings_schema.json"))
         }
+        "warpctrl" => BundledSkillActivation::RequiresFeature(FeatureFlag::WarpControlCli),
         _ => BundledSkillActivation::Always,
     }
 }
