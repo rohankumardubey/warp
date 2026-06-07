@@ -53,27 +53,15 @@ fn rejects_conflicting_instance_selectors() {
 
 #[test]
 fn parses_instance_and_pid_selectors() {
-    let args = ControlArgs::try_parse_from([
-        "warpctrl",
-        "tab",
-        "create",
-        "--instance",
-        "inst_123",
-    ])
-    .expect("instance selector parses");
+    let args = ControlArgs::try_parse_from(["warpctrl", "tab", "create", "--instance", "inst_123"])
+        .expect("instance selector parses");
     let ControlCommand::Tab(TabCommand::Create(create)) = args.command else {
         panic!("expected tab create command");
     };
     assert_eq!(create.target.instance.as_deref(), Some("inst_123"));
 
-    let args = ControlArgs::try_parse_from([
-        "warpctrl",
-        "app",
-        "ping",
-        "--pid",
-        "123",
-    ])
-    .expect("pid selector parses");
+    let args = ControlArgs::try_parse_from(["warpctrl", "app", "ping", "--pid", "123"])
+        .expect("pid selector parses");
     let ControlCommand::App(AppCommand::Ping(target)) = args.command else {
         panic!("expected app ping command");
     };

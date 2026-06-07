@@ -12,16 +12,13 @@ pub mod selection;
 pub mod selectors;
 
 pub use auth::{AuthToken, CredentialGrant, CredentialRequest, ScopedCredential};
-pub use catalog::{
-    ActionImplementationStatus, ActionKind, ActionMetadata, AuthenticatedUserRequirement,
-    InvocationContext, TargetScope,
-};
+pub use catalog::{ActionImplementationStatus, ActionKind, ActionMetadata, TargetScope};
 pub use discovery::{
     ControlEndpoint, CredentialBrokerReference, InstanceId, InstanceRecord, RegisteredInstance,
     discovery_dir,
 };
 pub use protocol::{
-    Action, ControlError, ControlResponse, ErrorCode, ErrorResponseEnvelope, ExecutionContextProof,
-    PROTOCOL_VERSION, RequestEnvelope, ResponseEnvelope,
+    Action, ControlError, ControlResponse, ErrorCode, ErrorResponseEnvelope, PROTOCOL_VERSION,
+    RequestEnvelope, ResponseEnvelope,
 };
-pub use selectors::{PaneSelector, TabSelector, TargetSelector, WindowSelector};
+pub use selectors::{PaneSelector, SessionSelector, TabSelector, TargetSelector, WindowSelector};

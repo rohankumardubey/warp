@@ -51,15 +51,13 @@
 //! or wrong-instance credentials, and accidentally over-scoped credentials from
 //! invoking actions. The broker authenticates the OS account, not the calling
 //! application: malicious software already running as the same user remains
-//! outside this boundary. Verified inside-Warp terminal credentials remain
-//! future work until the app-issued proof broker is implemented.
+//! outside this boundary.
 //!
 //! The Settings > Scripting gates used here are local-only settings backed by
 //! Warp's secure storage provider.
 //!
 //! Discovery records never include raw bearer tokens: discovery only exposes
-//! endpoint metadata and credential broker references when outside-Warp control
-//! is enabled.
+//! endpoint metadata and credential broker references while Scripting is enabled.
 mod bridge;
 mod handlers;
 mod permissions;
@@ -76,7 +74,6 @@ use std::sync::{Arc, Mutex};
 use ::local_control::auth::CredentialGrant;
 #[cfg(any(unix, test))]
 use ::local_control::auth::{CredentialRequest, ScopedCredential};
-use ::local_control::InvocationContext;
 use ::local_control::{
     ActionKind, AuthToken, ControlEndpoint, ControlError, ControlResponse, ErrorCode,
     ErrorResponseEnvelope, InstanceId, InstanceRecord, RegisteredInstance, RequestEnvelope,
@@ -152,7 +149,7 @@ impl LocalControlServer {
         server
     }
 
-    /// Starts, refreshes, or removes all outside-Warp publication as settings change.
+    /// Starts, refreshes, or removes local-control publication as settings change.
     fn refresh_for_settings(&mut self, ctx: &mut ModelContext<Self>) -> Result<(), ControlError> {
         if !permissions::warp_control_cli_enabled() {
             self.stop();
@@ -162,9 +159,7 @@ impl LocalControlServer {
             self.stop();
             return Ok(());
         }
-        let outside_warp_control_enabled =
-            crate::settings::LocalControlSettings::as_ref(ctx).outside_warp_control_enabled();
-        if !outside_warp_control_enabled {
+        if !crate::settings::LocalControlSettings::as_ref(ctx).is_enabled() {
             self.stop();
             return Ok(());
         }
@@ -197,10 +192,10 @@ impl LocalControlServer {
         if !outside_warp_publication_supported() {
             return Err(ControlError::new(
                 ErrorCode::LocalControlDisabled,
-                "outside-Warp local control is disabled until this platform enforces discovery-record ACLs",
+                "local control is disabled until this platform enforces discovery-record ACLs",
             ));
         }
-        if !crate::settings::LocalControlSettings::as_ref(ctx).outside_warp_control_enabled() {
+        if !crate::settings::LocalControlSettings::as_ref(ctx).is_enabled() {
             return Ok(());
         }
         let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -292,14 +287,14 @@ impl LocalControlServer {
 /// Builds routing metadata without embedding any bearer credential or secret.
 ///
 /// The endpoint and derived broker reference are published only while the
-/// protected outside-Warp setting permits clients to use them.
+/// protected Scripting setting permits clients to use them.
 fn discovery_record_for_settings(
     ctx: &ModelContext<LocalControlServer>,
     control_endpoint: ControlEndpoint,
 ) -> InstanceRecord {
-    let outside_warp_control_enabled =
-        crate::settings::LocalControlSettings::as_ref(ctx).outside_warp_control_enabled();
-    let endpoint = outside_warp_control_enabled.then_some(control_endpoint);
+    let endpoint = crate::settings::LocalControlSettings::as_ref(ctx)
+        .is_enabled()
+        .then_some(control_endpoint);
     InstanceRecord::for_current_process(
         endpoint,
         ChannelState::channel().to_string(),
@@ -472,7 +467,7 @@ async fn issue_credential(
         .bridge_spawner
         .spawn({
             let action = request.action;
-            move |_, ctx| ensure_action_allowed(InvocationContext::OutsideWarp, action, ctx)
+            move |_, ctx| ensure_action_allowed(action, ctx)
         })
         .await
         .map_err(|_| {
@@ -685,9 +680,7 @@ pub(crate) fn validate_loopback_headers(
 #[cfg(test)]
 pub(crate) use bridge::validate_request_authority;
 #[cfg(test)]
-pub(crate) use permissions::{
-    capabilities, ensure_settings_allow_action, outside_warp_control_enabled_for_settings,
-};
+pub(crate) use permissions::{capabilities, ensure_settings_allow_action};
 #[cfg(test)]
 pub(crate) use resolver::{
     require_active_window_id, resolve_index_from_ids, resolve_title_from_matches,

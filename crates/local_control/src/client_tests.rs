@@ -1,6 +1,8 @@
 #[cfg(unix)]
 use std::io::{Read as _, Write as _};
 
+#[cfg(unix)]
+use chrono::Duration;
 use chrono::Utc;
 use uuid::Uuid;
 
@@ -8,8 +10,6 @@ use super::*;
 #[cfg(unix)]
 use crate::auth::CredentialGrant;
 use crate::discovery::{ControlEndpoint, CredentialBrokerReference, InstanceId};
-#[cfg(unix)]
-use chrono::Duration;
 #[cfg(unix)]
 #[test]
 fn credential_client_exchanges_request_over_broker_socket() {
