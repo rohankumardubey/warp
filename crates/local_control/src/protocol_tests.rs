@@ -79,13 +79,13 @@ fn target_selector_roundtrips_exact_session_id() {
 fn response_error_serializes_machine_code() {
     let response = ResponseEnvelope::error(
         Uuid::nil(),
-        ControlError::new(ErrorCode::UserConfirmationRequired, "confirm close"),
+        ControlError::new(ErrorCode::InsufficientPermissions, "wrong action"),
     );
     let value = serde_json::to_value(&response).expect("response serializes");
     assert_eq!(value["response"]["status"], "error");
     assert_eq!(
         value["response"]["error"]["code"],
-        "user_confirmation_required"
+        "insufficient_permissions"
     );
 }
 
@@ -199,21 +199,16 @@ fn direct_surface_actions_have_stable_names() {
 }
 
 #[test]
-fn catalog_has_exact_confirmation_policy() {
-    let confirmed = ActionKind::ALL
-        .iter()
-        .copied()
-        .filter(|kind| kind.metadata().requires_user_confirmation)
-        .collect::<Vec<_>>();
-    assert_eq!(
-        confirmed,
-        vec![
-            ActionKind::WindowClose,
-            ActionKind::TabClose,
-            ActionKind::PaneClose
-        ]
-    );
-    assert_eq!(ActionKind::ALL.len() - confirmed.len(), 81);
+fn catalog_actions_share_uniform_authorization() {
+    for kind in ActionKind::ALL {
+        let metadata = kind.metadata();
+        assert_eq!(
+            metadata.implementation_status,
+            ActionImplementationStatus::Implemented,
+            "{} should be implemented",
+            metadata.name,
+        );
+    }
 }
 
 #[test]

@@ -20,7 +20,7 @@ Before implementing any local-control listener, CLI command, credential path, or
 - The broker authenticates the OS user through kernel peer credentials, not the calling application.
 - Every credential grants one exact action, is bound to the issuing instance, and has a short expiry.
 - The app bridge verifies the exact granted action before selector resolution or handler dispatch.
-- The 3 close actions (`window.close`, `tab.close`, `pane.close`) require one-shot in-app confirmation.
+- Close actions (`window.close`, `tab.close`, `pane.close`) flow through normal Warp close behavior so existing app warnings remain authoritative.
 - Input-staging commands never submit the buffer. There is no `input.run` action.
 - The Block, Auth, Drive, and History families are entirely absent from the 84-action catalog. Input is limited to `input.insert` and `input.replace`.
 ### 1. Protocol crate and stable envelope
@@ -28,7 +28,6 @@ Create a shared protocol crate used by both the app server and the `warpctrl` cl
 - A request protocol version for defensive schema guarding.
 - Discovery/health response types.
 - The 84-action `ActionKind` enum with implementation status metadata. The Block, Auth, Drive, and History families are entirely absent; Input is limited to `input.insert` and `input.replace`.
-- One-shot confirmation metadata for the 3 close actions.
 - Selector types:
   - `InstanceSelector`: `Active`, `Id(InstanceId)`, `Pid(u32)`.
   - `WindowSelector`: `Active`, `Id(WindowId)`, `Index(u32)`, `Title(String)`.
@@ -67,7 +66,7 @@ Error response:
   }
 }
 ```
-Error codes include: `local_control_disabled`, `unauthorized_local_client`, `insufficient_permissions`, `user_confirmation_required`, `user_confirmation_denied`, `user_confirmation_expired`, `ambiguous_instance`, `ambiguous_target`, `stale_target`, `missing_target`, `invalid_request`, `invalid_selector`, `invalid_params`, `unsupported_action`, `not_allowlisted`, `target_state_conflict`, `no_instance`.
+Error codes include: `local_control_disabled`, `unauthorized_local_client`, `insufficient_permissions`, `ambiguous_instance`, `ambiguous_target`, `stale_target`, `missing_target`, `invalid_request`, `invalid_selector`, `invalid_params`, `unsupported_action`, `not_allowlisted`, `target_state_conflict`, `no_instance`.
 ### 2. Per-process discovery
 Keep the existing fixed-port `9277` HTTP behavior intact. Add a separate local-control listener per process.
 Design:
@@ -121,7 +120,6 @@ HTTP handler (Tokio thread)
 
 LocalControlBridge::handle_request (main thread)
   ├─ verify the credential grants the exact requested action
-  ├─ for close actions: present one-shot confirmation, fail with user_confirmation_denied/expired if not approved
   ├─ match request.action.kind
   │   └─ ActionKind::TabCreate
   │       ├─ resolve window: active window, or sole window, or missing_target/ambiguous_target
@@ -135,9 +133,8 @@ LocalControlBridge::handle_request (main thread)
 1. Add an entry to the `ActionKind` catalog.
 2. Add a match arm in `LocalControlBridge::handle_request`.
 3. Verify the credential grants the exact action before selector resolution.
-4. For close actions, enforce one-shot confirmation.
-5. Resolve selectors and dispatch onto existing app types through `ctx`.
-6. Return `ResponseEnvelope::ok(...)` or `ResponseEnvelope::error(...)`.
+4. Resolve selectors and dispatch onto existing app types through `ctx`.
+5. Return `ResponseEnvelope::ok(...)` or `ResponseEnvelope::error(...)`.
 ### 6. Target resolution
 Implement target resolution as a reusable component.
 Resolution order: instance → window → tab → pane → session.
@@ -148,13 +145,8 @@ Selector behavior:
 - Title/name selectors are exact by default and return `ambiguous_target` on multiple matches.
 - Session-scoped requests against non-terminal panes return `target_state_conflict`.
 Target resolution happens after credential authentication and exact-action verification.
-### 7. One-shot close confirmation
-The 3 close actions (`window.close`, `tab.close`, `pane.close`) have a confirmation gate in the bridge:
-1. After exact-action credential verification, the bridge checks if the action requires confirmation.
-2. If so, the bridge presents a brief in-app confirmation dialog to the user.
-3. The user must approve. If declined, the bridge returns `user_confirmation_denied`. If the confirmation times out, the bridge returns `user_confirmation_expired`.
-4. If approved, the bridge proceeds with target resolution and handler dispatch.
-The confirmation is per-invocation. There is no "always allow" setting. All other 81 actions skip this step.
+### 7. Close behavior
+The 3 close actions (`window.close`, `tab.close`, `pane.close`) flow through normal Warp close behavior after exact-action credential validation and deterministic target resolution. Existing warnings for unsaved files, running processes, shared sessions, and similar app state remain authoritative and may cancel the close.
 ### 8. CLI parsing and output
 The CLI uses the same libraries as the Oz CLI:
 - **clap** (derive) for argument parsing and subcommand trees.
@@ -196,8 +188,8 @@ The first implementation slice proves the end-to-end architecture:
 - Structured success/error output in pretty and JSON formats.
 ### 12. Follow-up slices
 After the first slice validates the architecture, add remaining catalog actions in family groups:
-- Window/tab mutations (including close with one-shot confirmation).
-- Pane mutations (including close with one-shot confirmation).
+- Window/tab mutations (including close through normal Warp close behavior).
+- Pane mutations (including close through normal Warp close behavior).
 - Session actions.
 - Input staging (insert and replace only, never submitting).
 - Appearance/theme actions.
@@ -228,7 +220,6 @@ sequenceDiagram
     HTTP->>HTTP: Validate credential, reject if expired/invalid
     HTTP->>BRIDGE: Typed request + credential on main thread
     BRIDGE->>BRIDGE: Verify exact action matches credential
-    BRIDGE->>BRIDGE: For close actions: one-shot confirmation
     BRIDGE->>BRIDGE: Resolve target selectors
     BRIDGE->>UI: Execute allowlisted handler
     UI-->>BRIDGE: Typed result
@@ -239,15 +230,14 @@ sequenceDiagram
 - **Catalog invariant:** Every `ActionKind` with `Implemented` status has a parseable `warpctrl` CLI route, generated help/completion coverage, and an app-side bridge handler.
 - **Scripting gate:** Disabled state rejects all credential requests and control requests. Enabled state allows them. Toggling invalidates outstanding credentials.
 - **Credential model:** Raw credentials never appear in discovery records. Credentials are instance-bound, action-bound, and short-lived. A credential for one action fails with `insufficient_permissions` for any other action.
-- **One-shot confirmation:** Close actions fail with `user_confirmation_denied` when declined and `user_confirmation_expired` when timed out. Non-close actions skip confirmation.
 - **Selector resolution:** Tests for active, explicit ID, index, stale target, ambiguous target, missing target, and target-state-conflict cases.
 - **Input staging:** Only `input.insert` and `input.replace` exist. No `input.run`, `input.get`, `input.clear`, or `input.mode.set`. Tests prove no buffer submission occurs.
 - **Excluded families:** The Block, Auth, Drive, and History families are entirely absent. Requesting any of them returns `not_allowlisted`.
 - **Unsupported platforms:** Windows fails closed with no fallback.
-- **Action count:** Tests verify the catalog contains exactly 84 actions, 81 default-authorized, 3 requiring confirmation.
+- **Action count:** Tests verify the catalog contains exactly 84 uniformly authorized actions.
 - **Bundled skill gate:** Tests verify the `warpctrl` and `warp-tour` bundled skills are discoverable and readable only while `FeatureFlag::WarpControlCli` is enabled, without affecting unrelated bundled skills.
 ## Risks and mitigations
-- **Same-user residual risk:** The broker authenticates the OS user, not the calling application. Any process running as the same user can request credentials. Mitigated by: protected enablement, short expiry, exact-action grants, app-side revalidation, one-shot confirmation for destructive actions.
+- **Same-user residual risk:** The broker authenticates the OS user, not the calling application. Any process running as the same user can request credentials. Mitigated by: protected enablement, short expiry, exact-action grants, app-side revalidation, normal Warp close warnings for close actions.
 - **Browser-to-localhost:** Mitigated by: no permissive CORS, Origin header rejection, Host header validation, credential requirement.
 - **Fixed-port contention:** Mitigated by: leaving `9277` undisturbed, using per-process ephemeral ports for control.
 - **Input execution risk:** Mitigated by: no `input.run` in the catalog, input commands stage text only, tests prove no submission.

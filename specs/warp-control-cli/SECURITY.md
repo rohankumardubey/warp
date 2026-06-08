@@ -5,7 +5,7 @@ The security architecture has five layers:
 2. **Owner-only discovery:** Per-user filesystem discovery with owner-only permissions finds compatible instances without granting control authority.
 3. **Same-user credential broker:** A Unix-domain socket authenticates the OS user through kernel peer credentials and issues short-lived exact-action credentials. The broker authenticates the OS user, not the calling application.
 4. **Loopback HTTP transport:** An instance-local listener on `127.0.0.1` carries typed requests with broker-issued credentials.
-5. **App-side enforcement:** The running Warp app verifies the exact granted action, resolves targets deterministically, and enforces one-shot confirmation for close actions.
+5. **App-side enforcement:** The running Warp app verifies the exact granted action and resolves targets deterministically. Close actions flow through normal Warp close behavior so existing app warnings remain authoritative.
 Exact-action credentials are safety and intent mechanisms. They let a script or agent request only the specific operation it intends to perform so authority for a harmless UI action cannot accidentally be reused for a destructive close. They are not a hard security boundary against malicious same-user software.
 ## Security goals
 - Allow same-user processes to control a running Warp instance through a typed, allowlisted interface when Scripting is enabled.
@@ -17,15 +17,14 @@ Exact-action credentials are safety and intent mechanisms. They let a script or 
 - Require Scripting to be enabled (the default) before any control requests are accepted.
 - Keep credentials out of plaintext discovery records and mint them only in memory.
 - Authorize every action by its exact typed identity in the app bridge.
-- Require one-shot in-app confirmation for the 3 destructive close actions (`window.close`, `tab.close`, `pane.close`).
+- Route close actions through normal Warp close behavior so existing app warnings for unsaved files, running processes, and shared sessions remain authoritative.
 - Ensure the two input-staging commands (`input.insert`, `input.replace`) never submit the buffer. No other input actions exist.
 - Keep the action surface at exactly 84 allowlisted actions. The Block, Auth, Drive, and History families are entirely absent.
 - Fail closed on platforms without owner-only discovery and authenticated broker transport.
 - Preserve deterministic targeting so a request never silently mutates or reads the wrong target.
 ## Honest same-user limitations
 The broker authenticates the connecting process's OS user through kernel peer credentials. It does not prove that the caller is the official `warpctrl` binary, Warp-signed code, or a human-approved invocation. When Scripting is enabled (the default), any process running as the same OS user can:
-- Connect to the broker socket and request credentials for any of the 81 default-authorized actions.
-- Request credentials for the 3 close actions (though the user must still approve each one-shot confirmation in the app).
+- Connect to the broker socket and request credentials for any of the 84 actions.
 - Invoke `warpctrl` as a confused deputy.
 The architecture therefore provides a **meaningful hard boundary** against:
 - Other OS users.
@@ -36,7 +35,7 @@ For same-user software, the protections are **intent guardrails**, not strong is
 - Protected enablement prevents silent activation.
 - Short-lived credentials prevent ambient reuse.
 - Exact-action grants prevent accidental overreach.
-- One-shot confirmation prevents unattended destructive closes.
+- Normal Warp close behavior preserves existing warnings for close actions.
 - App-side revalidation catches stale or misused credentials.
 A hostile same-user process that can automate the Warp UI, read local state, or invoke `warpctrl` is not made safe by this architecture. The value is preventing easy ambient paths (web-origin, other-user, unauthenticated localhost) and giving honest callers narrow, auditable grants.
 ## Threat model
@@ -111,18 +110,13 @@ Constraints:
 ### Exact-action grants
 Every credential grants one exact typed action. The app bridge compares the requested action to the granted action before selector resolution or handler dispatch. A credential for `tab.create` cannot authorize `tab.close`, `setting.set`, or any other action. Similar actions do not inherit authority.
 This prevents accidental overreach and gives Warp a structured point to deny sensitive actions. It does not make untrusted same-user software safe.
-### One-shot close confirmation
-Three destructive actions (`window.close`, `tab.close`, `pane.close`) require one-shot in-app confirmation:
-1. After credential verification, the bridge checks if the action requires confirmation.
-2. The bridge presents a brief in-app confirmation to the user.
-3. If approved, the bridge proceeds with handler dispatch.
-4. If declined, the bridge returns `user_confirmation_denied`. If the confirmation times out, the bridge returns `user_confirmation_expired`.
-The confirmation is per-invocation. There is no persistent "always allow" option. All other 81 actions execute immediately after credential verification.
+### Close behavior
+The three destructive actions (`window.close`, `tab.close`, `pane.close`) execute after the same exact-action credential validation as every other action. They flow through normal Warp close behavior so existing app warnings remain authoritative.
 ### Confused-deputy mitigation
 The broker authenticates the OS user, not the calling application. Any same-user process can request credentials. Mitigations:
 - Exact-action credentials prevent accidental action overreach.
 - Short expiry limits the window for credential reuse.
-- One-shot confirmation requires human approval for destructive closes.
+- Normal Warp close behavior preserves existing warnings for close actions.
 - No `input.run` action exists, so `warpctrl` cannot be used to execute terminal commands.
 - Protected enablement prevents silent activation of the control surface.
 - App-side bridge enforcement re-checks every credential on every request.
@@ -146,9 +140,8 @@ The bridge:
 2. Parses the typed request envelope.
 3. Verifies protocol version compatibility.
 4. Compares the requested action to the granted action. Rejects mismatches with `insufficient_permissions`.
-5. For close actions: presents one-shot confirmation. Rejects with `user_confirmation_denied` if declined or `user_confirmation_expired` if timed out.
-6. Resolves targets deterministically. Rejects ambiguous, missing, or stale targets with structured errors.
-7. Invokes only the allowlisted typed handler.
+5. Resolves targets deterministically. Rejects ambiguous, missing, or stale targets with structured errors.
+6. Invokes only the allowlisted typed handler.
 ## Target scoping
 Targeting is part of security. The protocol never converts ambiguous or stale selectors into best-effort mutations.
 Rules:
@@ -176,9 +169,6 @@ Structured errors are part of the security contract:
 - `local_control_disabled` — Scripting is disabled.
 - `unauthorized_local_client` — missing, malformed, expired, or invalid credential.
 - `insufficient_permissions` — credential grants a different action.
-- `user_confirmation_required` — action requires one-shot confirmation that has not been presented yet.
-- `user_confirmation_denied` — user declined one-shot close confirmation.
-- `user_confirmation_expired` — one-shot confirmation timed out without a response.
 - `ambiguous_instance` — multiple instances, no unambiguous selection.
 - `ambiguous_target` — multiple matching targets.
 - `stale_target` — explicit target ID no longer exists.
@@ -223,9 +213,9 @@ Before shipping each action family:
 - The action has a documented entry in the 84-action catalog.
 - The bridge verifies the credential grants that exact action.
 - Ambiguous, missing, and stale targets return structured errors.
-- Close actions enforce one-shot confirmation.
+- Close actions flow through normal Warp close behavior.
 - Input actions never submit the buffer.
 - Tests cover the allowed path and the wrong-action-credential denial path.
 - Logs and errors do not expose credentials, terminal contents, or sensitive settings.
 - The Block, Auth, Drive, and History families remain absent from the catalog.
-- The catalog contains exactly 84 actions with 81 default-authorized and 3 confirmation-required.
+- The catalog contains exactly 84 default-authorized actions.
