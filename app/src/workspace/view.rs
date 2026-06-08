@@ -191,8 +191,8 @@ use crate::ai::blocklist::suggested_rule_modal::{
     SuggestedRuleAndId, SuggestedRuleModal, SuggestedRuleModalEvent,
 };
 use crate::ai::blocklist::{
-    BlocklistAIHistoryEvent, PendingQueryState, QueuedQueryOrigin, SerializedBlockListItem,
-    SlashCommandRequest, FORK_PREFIX,
+    BlocklistAIHistoryEvent, PendingAttachment, PendingQueryState, QueuedQueryOrigin,
+    SerializedBlockListItem, SlashCommandRequest, FORK_PREFIX,
 };
 use crate::ai::cloud_agent_settings::CloudAgentSettings;
 #[cfg(target_family = "wasm")]
@@ -12893,6 +12893,7 @@ impl Workspace {
         summarize_after_fork: bool,
         summarization_prompt: Option<String>,
         initial_prompt: Option<String>,
+        initial_attachments: Vec<PendingAttachment>,
         destination: ForkedConversationDestination,
         ctx: &mut ViewContext<Self>,
     ) {
@@ -12978,6 +12979,7 @@ impl Workspace {
                             summarize_after_fork,
                             summarization_prompt,
                             initial_prompt,
+                            initial_attachments,
                             destination,
                             has_initial_query,
                             source_terminal_view_id,
@@ -12995,6 +12997,7 @@ impl Workspace {
                     summarize_after_fork,
                     summarization_prompt,
                     initial_prompt,
+                    initial_attachments,
                     destination,
                     has_initial_query,
                     source_terminal_view_id,
@@ -13018,6 +13021,7 @@ impl Workspace {
         summarize_after_fork: bool,
         summarization_prompt: Option<String>,
         initial_prompt: Option<String>,
+        initial_attachments: Vec<PendingAttachment>,
         destination: ForkedConversationDestination,
         has_initial_query: bool,
         source_terminal_view_id: Option<EntityId>,
@@ -13089,8 +13093,9 @@ impl Workspace {
                 Self::handle_forked_conversation_prompts(
                     terminal_view,
                     summarize_after_fork,
-                    summarization_prompt,
-                    initial_prompt,
+                    summarization_prompt.clone(),
+                    initial_prompt.clone(),
+                    initial_attachments.clone(),
                     forked_conversation_id,
                     ctx,
                 );
@@ -13141,8 +13146,9 @@ impl Workspace {
                 Self::handle_forked_conversation_prompts(
                     terminal_view,
                     summarize_after_fork,
-                    summarization_prompt,
-                    initial_prompt,
+                    summarization_prompt.clone(),
+                    initial_prompt.clone(),
+                    initial_attachments.clone(),
                     forked_conversation_id,
                     ctx,
                 );
@@ -13186,6 +13192,7 @@ impl Workspace {
                 summarize_after_fork,
                 summarization_prompt,
                 initial_prompt,
+                initial_attachments,
                 forked_conversation_id,
                 ctx,
             );
@@ -13201,11 +13208,14 @@ impl Workspace {
     }
 
     /// Handle sending summarize and/or initial prompt to a forked conversation.
+    /// If `initial_attachments` are provided, they are added to the new pane's context
+    /// model so they are included when the initial prompt is sent.
     fn handle_forked_conversation_prompts(
         terminal_view: ViewHandle<TerminalView>,
         summarize_after_fork: bool,
         summarization_prompt: Option<String>,
         initial_prompt: Option<String>,
+        initial_attachments: Vec<PendingAttachment>,
         forked_conversation_id: AIConversationId,
         ctx: &mut ViewContext<Self>,
     ) {
@@ -13235,6 +13245,16 @@ impl Workspace {
                     );
                 }
             } else if let Some(prompt) = initial_prompt {
+                // Add any attachments to the new pane's context model before sending,
+                // so images/files from the source pane are included with the prompt.
+                if !initial_attachments.is_empty() {
+                    terminal_view.ai_context_model().update(
+                        terminal_view_ctx,
+                        |context_model, ctx| {
+                            context_model.append_pending_attachments(initial_attachments, ctx);
+                        },
+                    );
+                }
                 terminal_view
                     .ai_controller()
                     .update(terminal_view_ctx, |controller, ctx| {
@@ -24359,6 +24379,7 @@ impl TypedActionView for Workspace {
                 summarize_after_fork,
                 summarization_prompt,
                 initial_prompt,
+                initial_attachments,
                 destination,
             } => {
                 self.fork_ai_conversation(
@@ -24367,6 +24388,7 @@ impl TypedActionView for Workspace {
                     *summarize_after_fork,
                     summarization_prompt.clone(),
                     initial_prompt.clone(),
+                    initial_attachments.clone(),
                     *destination,
                     ctx,
                 );
@@ -24379,6 +24401,7 @@ impl TypedActionView for Workspace {
                     false,
                     None,
                     None,
+                    vec![],
                     ForkedConversationDestination::SplitPane,
                     ctx,
                 );

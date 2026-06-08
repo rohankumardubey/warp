@@ -27096,6 +27096,7 @@ impl TypedActionView for TerminalView {
                             summarize_after_fork: false,
                             summarization_prompt: None,
                             initial_prompt: None,
+                            initial_attachments: vec![],
                             destination: ForkedConversationDestination::SplitPane,
                         });
                     }
