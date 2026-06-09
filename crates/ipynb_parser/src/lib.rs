@@ -1,9 +1,16 @@
-//! Converts `.ipynb` (Jupyter) notebooks into Markdown that Warp's existing
-//! rich-text/notebook renderer can display.
+//! Parses `.ipynb` (Jupyter) notebooks directly into the [`FormattedText`]
+//! representation that Warp's rich-text/notebook renderer consumes.
 //!
-//! This is **render-only**: it produces a read-only Markdown representation of
-//! the notebook's existing content (markdown cells, code cells, and saved
-//! outputs). It does not execute cells or round-trip edits back to the file.
+//! This is **render-only**: it produces a read-only view of the notebook's
+//! existing content (markdown cells, code cells, and saved outputs). It does
+//! not execute cells or round-trip edits back to the file.
+//!
+//! Building [`FormattedText`] directly (rather than emitting a Markdown string
+//! that is then re-parsed) means the notebook is parsed once, and code/output
+//! content is placed into structured [`FormattedTextLine`] values instead of
+//! being serialized into Markdown code fences. As a result, untrusted notebook
+//! data (a code cell's language tag, an output image's payload) lives in struct
+//! fields and can never break out of a Markdown fence or image URL.
 //!
 //! Only nbformat v4 is supported. Anything that fails to parse as a v4 notebook
 //! returns an [`IpynbError`] so callers can fall back to showing the raw file
@@ -11,8 +18,12 @@
 
 use std::collections::BTreeMap;
 
-use base64::prelude::BASE64_STANDARD;
 use base64::Engine as _;
+use base64::prelude::BASE64_STANDARD;
+use markdown_parser::{
+    CodeBlockText, FormattedImage, FormattedText, FormattedTextFragment, FormattedTextLine,
+    parse_markdown, parse_markdown_with_gfm_tables,
+};
 use serde::Deserialize;
 
 /// The only nbformat major version this converter understands.
@@ -27,9 +38,9 @@ const MAX_TEXT_OUTPUT_CHARS: usize = 100_000;
 /// still renders without freezing the UI.
 const MAX_IMAGE_DATA_CHARS: usize = 8 * 1024 * 1024;
 
-/// Maximum length of a code-fence language tag we will emit. Real language
+/// Maximum length of a code-block language tag we will emit. Real language
 /// names are short; a longer value is treated as untrusted junk and dropped so
-/// it cannot bloat every code fence.
+/// it cannot bloat every code block.
 const MAX_LANGUAGE_TAG_CHARS: usize = 32;
 
 /// Error produced when the input cannot be rendered as a supported notebook.
@@ -39,16 +50,22 @@ pub enum IpynbError {
     #[error("failed to parse notebook JSON: {0}")]
     Parse(#[from] serde_json::Error),
     /// The notebook used an unsupported nbformat version (only v4 is supported).
-    #[error("unsupported notebook format: nbformat={nbformat:?} (only v{SUPPORTED_NBFORMAT} is supported)")]
+    #[error(
+        "unsupported notebook format: nbformat={nbformat:?} (only v{SUPPORTED_NBFORMAT} is supported)"
+    )]
     UnsupportedFormat { nbformat: Option<i64> },
 }
 
-/// Convert the JSON contents of a `.ipynb` file into Markdown.
+/// Convert the JSON contents of a `.ipynb` file into [`FormattedText`].
+///
+/// `gfm_tables` selects the GFM-table-aware Markdown parser for markdown cells,
+/// mirroring the `Buffer::from_markdown` behavior (the caller passes the
+/// `MarkdownTables` feature flag state).
 ///
 /// Returns an [`IpynbError`] if the input is not a parseable nbformat v4
-/// notebook; callers should fall back to displaying the raw contents in that
-/// case (never a blank view).
-pub fn ipynb_to_markdown(json: &str) -> Result<String, IpynbError> {
+/// notebook; callers should fall back to [`raw_fallback_formatted_text`] in that
+/// case so the contents are shown verbatim (never a blank view).
+pub fn ipynb_to_formatted_text(json: &str, gfm_tables: bool) -> Result<FormattedText, IpynbError> {
     let notebook: Notebook = serde_json::from_str(json)?;
 
     // Guard against arbitrary JSON that happens to deserialize into an empty
@@ -60,19 +77,19 @@ pub fn ipynb_to_markdown(json: &str) -> Result<String, IpynbError> {
     }
 
     let language = notebook.language();
-    let mut out = String::new();
+    let mut lines: Vec<FormattedTextLine> = Vec::new();
 
     for cell in &notebook.cells {
         match cell.cell_type.as_str() {
             "markdown" => {
                 let source = cell.source.to_text();
-                push_block(&mut out, source.trim_end_matches('\n'));
+                push_markdown_block(&mut lines, source.trim_end_matches('\n'), gfm_tables);
             }
             "code" => {
                 let source = cell.source.to_text();
-                push_code_block(&mut out, &language, source.trim_end_matches('\n'));
+                push_code_block(&mut lines, &language, source.trim_end_matches('\n'));
                 for output in &cell.outputs {
-                    push_output(&mut out, output);
+                    push_output(&mut lines, output);
                 }
             }
             // Raw cells are passed through verbatim in Jupyter; render them as a
@@ -80,57 +97,67 @@ pub fn ipynb_to_markdown(json: &str) -> Result<String, IpynbError> {
             // unexpected markdown.
             "raw" => {
                 let source = cell.source.to_text();
-                push_code_block(&mut out, "", source.trim_end_matches('\n'));
+                push_code_block(&mut lines, "", source.trim_end_matches('\n'));
             }
             // Unknown / future cell types are skipped rather than rendered raw.
             _ => {}
         }
     }
 
-    Ok(out.trim_end().to_string())
+    Ok(FormattedText::new_trimmed(lines))
 }
 
-/// Wrap raw file contents in a fenced code block so a notebook that fails to
-/// parse (malformed JSON, unsupported nbformat version, etc.) is shown verbatim
-/// as a fallback, never re-interpreted as Markdown/HTML. The fence length
-/// adapts so content containing backtick runs cannot break out of the block.
-pub fn raw_fallback_markdown(content: &str) -> String {
-    let mut out = String::new();
-    push_code_block(&mut out, "json", content.trim_end_matches('\n'));
-    out.trim_end().to_string()
+/// Build a verbatim [`FormattedText`] fallback for content that is not a
+/// parseable notebook (malformed JSON, unsupported nbformat version, etc.). The
+/// raw content is placed in a single code block so any Markdown/HTML inside it
+/// is shown verbatim, never re-interpreted.
+pub fn raw_fallback_formatted_text(content: &str) -> FormattedText {
+    FormattedText::new_trimmed(vec![FormattedTextLine::CodeBlock(CodeBlockText {
+        lang: "json".to_string(),
+        code: content.trim_end_matches('\n').to_string(),
+    })])
 }
 
-/// Append a block of already-formatted Markdown, separated from surrounding
-/// content by a blank line. Empty blocks are skipped.
-fn push_block(out: &mut String, content: &str) {
+/// Append a markdown cell, parsed into formatted text and separated from
+/// surrounding blocks by a line break. Empty cells are skipped.
+fn push_markdown_block(lines: &mut Vec<FormattedTextLine>, content: &str, gfm_tables: bool) {
     if content.is_empty() {
         return;
     }
-    out.push_str(content);
-    out.push_str("\n\n");
+    let parse_fn = if gfm_tables {
+        parse_markdown_with_gfm_tables
+    } else {
+        parse_markdown
+    };
+    // A markdown cell is, by definition, Markdown; parse it once. If parsing
+    // somehow fails, preserve the content verbatim as a plain line rather than
+    // dropping it.
+    let parsed = parse_fn(content).unwrap_or_else(|_| {
+        FormattedText::new(vec![FormattedTextLine::Line(vec![
+            FormattedTextFragment::plain_text(content),
+        ])])
+    });
+    lines.extend(parsed.lines);
+    lines.push(FormattedTextLine::LineBreak);
 }
 
-/// Append a fenced code block with the given language tag (empty for none).
-/// The fence length adapts so content containing backtick runs is not broken.
-fn push_code_block(out: &mut String, language: &str, content: &str) {
-    let fence = backtick_fence(content);
-    out.push_str(&fence);
-    out.push_str(language);
-    out.push('\n');
-    out.push_str(content);
-    if !content.is_empty() && !content.ends_with('\n') {
-        out.push('\n');
-    }
-    out.push_str(&fence);
-    out.push_str("\n\n");
+/// Append a code block with the given language tag (empty for none), separated
+/// from surrounding blocks by a line break. The language and code are stored as
+/// struct fields, so neither can break out of a Markdown fence.
+fn push_code_block(lines: &mut Vec<FormattedTextLine>, language: &str, content: &str) {
+    lines.push(FormattedTextLine::CodeBlock(CodeBlockText {
+        lang: language.to_string(),
+        code: content.to_string(),
+    }));
+    lines.push(FormattedTextLine::LineBreak);
 }
 
 /// Append a single saved cell output.
-fn push_output(out: &mut String, output: &Output) {
+fn push_output(lines: &mut Vec<FormattedTextLine>, output: &Output) {
     match output.output_type.as_str() {
         "stream" => {
             if let Some(text) = &output.text {
-                push_text_output(out, &text.to_text());
+                push_text_output(lines, &text.to_text());
             }
         }
         "execute_result" | "display_data" => {
@@ -140,29 +167,29 @@ fn push_output(out: &mut String, output: &Output) {
             // Prefer images, then plain text. Other MIME types (text/html,
             // LaTeX, widgets, ...) are intentionally skipped in v1.
             if let Some(value) = data.get("image/png") {
-                push_image(out, "image/png", value);
+                push_image(lines, "image/png", value);
             } else if let Some(value) = data.get("image/jpeg") {
-                push_image(out, "image/jpeg", value);
+                push_image(lines, "image/jpeg", value);
             } else if let Some(value) = data.get("text/plain") {
-                push_text_output(out, &value_to_text(value));
+                push_text_output(lines, &value_to_text(value));
             }
         }
         "error" => {
             let traceback = output
                 .traceback
                 .as_ref()
-                .map(|lines| lines.join("\n"))
+                .map(|tb| tb.join("\n"))
                 .unwrap_or_default();
-            push_text_output(out, &strip_ansi(&traceback));
+            push_text_output(lines, &strip_ansi(&traceback));
         }
         // Unknown output types are skipped.
         _ => {}
     }
 }
 
-/// Append a text output as a plain (unhighlighted) fenced block, truncating
+/// Append a text output as a plain (unhighlighted) code block, truncating
 /// oversized output. Empty output is skipped.
-fn push_text_output(out: &mut String, text: &str) {
+fn push_text_output(lines: &mut Vec<FormattedTextLine>, text: &str) {
     let text = text.trim_end_matches('\n');
     if text.is_empty() {
         return;
@@ -172,19 +199,18 @@ fn push_text_output(out: &mut String, text: &str) {
             "{}\n[output truncated]",
             truncate_chars(text, MAX_TEXT_OUTPUT_CHARS)
         );
-        push_code_block(out, "", &truncated);
+        push_code_block(lines, "", &truncated);
     } else {
-        push_code_block(out, "", text);
+        push_code_block(lines, "", text);
     }
 }
 
 /// Append an embedded image output as a base64 data-URI image. The image data
 /// is already base64 in the notebook, so we strip whitespace, bound the size,
 /// and validate that it really is base64 before embedding it. Invalid data is
-/// not embedded — it would render as a broken image and could contain Markdown
-/// metacharacters (e.g. `)`) that break out of the image URL — and the user is
-/// shown a clear message in its place instead.
-fn push_image(out: &mut String, mime: &str, value: &serde_json::Value) {
+/// not embedded — it would render as a broken image — and the user is shown a
+/// clear message in its place instead.
+fn push_image(lines: &mut Vec<FormattedTextLine>, mime: &str, value: &serde_json::Value) {
     let base64: String = value_to_text(value)
         .chars()
         .filter(|c| !c.is_whitespace())
@@ -193,31 +219,19 @@ fn push_image(out: &mut String, mime: &str, value: &serde_json::Value) {
         return;
     }
     if base64.len() > MAX_IMAGE_DATA_CHARS {
-        push_text_output(out, "[output image omitted: exceeds size limit]");
+        push_text_output(lines, "[output image omitted: exceeds size limit]");
         return;
     }
     if BASE64_STANDARD.decode(base64.as_bytes()).is_err() {
-        push_text_output(out, "[output image omitted: invalid base64 data]");
+        push_text_output(lines, "[output image omitted: invalid base64 data]");
         return;
     }
-    out.push_str(&format!("![output](data:{mime};base64,{base64})\n\n"));
-}
-
-/// Returns a backtick fence (at least three backticks) longer than any backtick
-/// run in `content`, so fenced content containing backticks is not terminated
-/// early.
-fn backtick_fence(content: &str) -> String {
-    let mut longest_run = 0;
-    let mut current_run = 0;
-    for ch in content.chars() {
-        if ch == '`' {
-            current_run += 1;
-            longest_run = longest_run.max(current_run);
-        } else {
-            current_run = 0;
-        }
-    }
-    "`".repeat(longest_run.max(2) + 1)
+    lines.push(FormattedTextLine::Image(FormattedImage {
+        alt_text: "output".to_string(),
+        source: format!("data:{mime};base64,{base64}"),
+        title: None,
+    }));
+    lines.push(FormattedTextLine::LineBreak);
 }
 
 /// Truncate a string to at most `max_chars` characters on a char boundary.
@@ -286,14 +300,12 @@ fn value_to_text(value: &serde_json::Value) -> String {
     }
 }
 
-/// Sanitize a notebook-declared language into a safe Markdown code-fence info
-/// string. Notebook metadata is untrusted: an arbitrary `language_info.name`
-/// could contain backticks, whitespace, or other info-string syntax that would
-/// break out of the opening fence and cause a code cell to render as Markdown
-/// instead of verbatim code. We therefore only keep values that look like a
-/// real language token — ASCII alphanumerics plus the few punctuation marks
-/// used in language names such as `c++`, `c#`, and `objective-c` — within a
-/// sane length. Anything else yields an empty tag (an unhighlighted, but safe,
+/// Sanitize a notebook-declared language into a safe code-block language tag.
+/// Notebook metadata is untrusted: an arbitrary `language_info.name` could
+/// contain whitespace or other junk. We only keep values that look like a real
+/// language token — ASCII alphanumerics plus the few punctuation marks used in
+/// language names such as `c++`, `c#`, and `objective-c` — within a sane
+/// length. Anything else yields an empty tag (an unhighlighted, but safe,
 /// code block).
 fn sanitize_language(raw: &str) -> String {
     let trimmed = raw.trim();
@@ -321,10 +333,9 @@ struct Notebook {
 }
 
 impl Notebook {
-    /// The code-fence language, derived from notebook metadata and sanitized to
-    /// a safe info-string token (see [`sanitize_language`]). Empty if the
-    /// notebook does not declare a language, or declares one that is not a safe
-    /// identifier.
+    /// The code-block language, derived from notebook metadata and sanitized to
+    /// a safe tag (see [`sanitize_language`]). Empty if the notebook does not
+    /// declare a language, or declares one that is not a safe identifier.
     fn language(&self) -> String {
         let raw = self
             .metadata
@@ -412,5 +423,5 @@ impl Source {
 }
 
 #[cfg(test)]
-#[path = "ipynb_tests.rs"]
+#[path = "lib_tests.rs"]
 mod tests;

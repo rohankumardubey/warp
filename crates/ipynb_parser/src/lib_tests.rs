@@ -1,4 +1,33 @@
+use markdown_parser::{CodeBlockText, FormattedImage, FormattedText, FormattedTextLine};
+
 use super::*;
+
+/// Convert a notebook, asserting it parses successfully (GFM tables off).
+fn convert(json: &str) -> FormattedText {
+    ipynb_to_formatted_text(json, false).expect("should convert")
+}
+
+/// All code blocks in the formatted text, in order.
+fn code_blocks(ft: &FormattedText) -> Vec<&CodeBlockText> {
+    ft.lines
+        .iter()
+        .filter_map(|line| match line {
+            FormattedTextLine::CodeBlock(block) => Some(block),
+            _ => None,
+        })
+        .collect()
+}
+
+/// All images in the formatted text, in order.
+fn images(ft: &FormattedText) -> Vec<&FormattedImage> {
+    ft.lines
+        .iter()
+        .filter_map(|line| match line {
+            FormattedTextLine::Image(image) => Some(image),
+            _ => None,
+        })
+        .collect()
+}
 
 #[test]
 fn test_markdown_and_code_cells() {
@@ -12,8 +41,16 @@ fn test_markdown_and_code_cells() {
         ]
     }"##;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
-    assert_eq!(md, "# Title\nSome text\n\n```python\nprint('hi')\n```");
+    let ft = convert(json);
+    // The markdown cell is parsed once into formatted text...
+    let raw = ft.raw_text();
+    assert!(raw.contains("Title"), "got: {raw:?}");
+    assert!(raw.contains("Some text"), "got: {raw:?}");
+    // ...and the code cell becomes a structured code block (no fence/re-parse).
+    let blocks = code_blocks(&ft);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].lang, "python");
+    assert_eq!(blocks[0].code, "print('hi')");
 }
 
 #[test]
@@ -25,9 +62,12 @@ fn test_code_cell_without_language() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
-    // No language tag follows the opening fence.
-    assert_eq!(md, "```\nx = 1\n```");
+    let blocks_owned = convert(json);
+    let blocks = code_blocks(&blocks_owned);
+    assert_eq!(blocks.len(), 1);
+    // No language tag when the notebook does not declare one.
+    assert_eq!(blocks[0].lang, "");
+    assert_eq!(blocks[0].code, "x = 1");
 }
 
 #[test]
@@ -38,24 +78,25 @@ fn test_language_falls_back_to_kernelspec() {
         "cells": [{"cell_type": "code", "source": "1 + 1"}]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
-    assert!(md.starts_with("```julia\n"), "got: {md}");
+    let ft = convert(json);
+    assert_eq!(code_blocks(&ft)[0].lang, "julia");
 }
 
 #[test]
 fn test_language_with_backticks_is_sanitized() {
-    // A hostile language tag containing backticks (and a newline) must not be
-    // written onto the fence line, where it could break out of the fence and
-    // make the code cell render as Markdown.
+    // A hostile language tag containing backticks (and a newline) must never end
+    // up as a code block's language. Because the language is now a struct field
+    // (not a fence), this can't break rendering regardless; we still drop it.
     let json = r#"{
         "nbformat": 4,
         "metadata": {"language_info": {"name": "py```\ninjected"}},
         "cells": [{"cell_type": "code", "source": "x = 1"}]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
-    // The unsafe tag is dropped, leaving a plain (but safe) fenced block.
-    assert_eq!(md, "```\nx = 1\n```");
+    let ft = convert(json);
+    let blocks = code_blocks(&ft);
+    assert_eq!(blocks[0].lang, "");
+    assert_eq!(blocks[0].code, "x = 1");
 }
 
 #[test]
@@ -67,8 +108,8 @@ fn test_language_with_special_chars_is_preserved() {
         "cells": [{"cell_type": "code", "source": "int x;"}]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
-    assert!(md.starts_with("```c++\n"), "got: {md}");
+    let ft = convert(json);
+    assert_eq!(code_blocks(&ft)[0].lang, "c++");
 }
 
 #[test]
@@ -84,7 +125,10 @@ fn test_sanitize_language_accepts_and_rejects() {
     assert_eq!(sanitize_language("py`thon"), "");
     assert_eq!(sanitize_language("two words"), "");
     assert_eq!(sanitize_language(""), "");
-    assert_eq!(sanitize_language(&"a".repeat(MAX_LANGUAGE_TAG_CHARS + 1)), "");
+    assert_eq!(
+        sanitize_language(&"a".repeat(MAX_LANGUAGE_TAG_CHARS + 1)),
+        ""
+    );
 }
 
 #[test]
@@ -99,8 +143,14 @@ fn test_stream_output_renders_as_text_block() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
-    assert_eq!(md, "```python\nprint('hello')\n```\n\n```\nhello\n```");
+    let ft = convert(json);
+    let blocks = code_blocks(&ft);
+    // Code cell, then its (unhighlighted) text output.
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[0].lang, "python");
+    assert_eq!(blocks[0].code, "print('hello')");
+    assert_eq!(blocks[1].lang, "");
+    assert_eq!(blocks[1].code, "hello");
 }
 
 #[test]
@@ -114,8 +164,10 @@ fn test_execute_result_text_plain() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
-    assert!(md.contains("```\n4\n```"), "got: {md}");
+    let ft = convert(json);
+    let blocks = code_blocks(&ft);
+    assert_eq!(blocks.len(), 2);
+    assert_eq!(blocks[1].code, "4");
 }
 
 #[test]
@@ -131,13 +183,14 @@ fn test_error_traceback_strips_ansi() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
+    let ft = convert(json);
+    let raw = ft.raw_text();
     assert!(
-        !md.contains('\u{1b}'),
-        "ANSI escapes should be stripped: {md:?}"
+        !raw.contains('\u{1b}'),
+        "ANSI escapes should be stripped: {raw:?}"
     );
-    assert!(md.contains("NameError: name 'boom'"), "got: {md}");
-    assert!(md.contains("is not defined"), "got: {md}");
+    assert!(raw.contains("NameError: name 'boom'"), "got: {raw:?}");
+    assert!(raw.contains("is not defined"), "got: {raw:?}");
 }
 
 #[test]
@@ -151,19 +204,19 @@ fn test_png_output_renders_as_data_uri_image() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
+    let ft = convert(json);
+    let images = images(&ft);
+    assert_eq!(images.len(), 1);
     // Whitespace in the embedded base64 is stripped.
-    assert!(
-        md.contains("![output](data:image/png;base64,iVBORw0KGgo=)"),
-        "got: {md}"
-    );
+    assert_eq!(images[0].source, "data:image/png;base64,iVBORw0KGgo=");
+    assert_eq!(images[0].alt_text, "output");
 }
 
 #[test]
 fn test_invalid_base64_image_shows_message() {
     // A payload that is not valid base64 (and contains a Markdown-breaking
-    // char) must not be embedded; the user sees a clear message instead, and
-    // no payload content leaks into the rendered Markdown.
+    // char) must not be embedded; the user sees a clear message instead, and no
+    // payload content leaks into the rendered output.
     let json = r#"{
         "nbformat": 4,
         "cells": [
@@ -173,18 +226,16 @@ fn test_invalid_base64_image_shows_message() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
+    let ft = convert(json);
+    assert!(images(&ft).is_empty(), "invalid image must not be embedded");
+    let raw = ft.raw_text();
     assert!(
-        md.contains("[output image omitted: invalid base64 data]"),
-        "expected invalid-image message, got: {md}"
+        raw.contains("[output image omitted: invalid base64 data]"),
+        "expected invalid-image message, got: {raw:?}"
     );
     assert!(
-        !md.contains("data:image/png;base64,"),
-        "invalid image must not be embedded as a data URI: {md}"
-    );
-    assert!(
-        !md.contains("evil"),
-        "invalid payload must not leak into the rendered Markdown: {md}"
+        !raw.contains("evil"),
+        "invalid payload must not leak into the rendered output: {raw:?}"
     );
 }
 
@@ -200,11 +251,12 @@ fn test_image_preferred_over_text_plain() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
-    assert!(md.contains("data:image/png;base64,AAAA"), "got: {md}");
+    let ft = convert(json);
+    assert_eq!(images(&ft).len(), 1);
+    assert_eq!(images(&ft)[0].source, "data:image/png;base64,AAAA");
     assert!(
-        !md.contains("<Figure>"),
-        "text/plain should be skipped when an image exists: {md}"
+        !ft.raw_text().contains("<Figure>"),
+        "text/plain should be skipped when an image exists"
     );
 }
 
@@ -219,14 +271,18 @@ fn test_unsupported_mime_is_skipped() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
+    let ft = convert(json);
     // The code still renders; the unsupported HTML output is dropped.
-    assert_eq!(md, "```\nhtml()\n```");
+    let blocks = code_blocks(&ft);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].code, "html()");
+    assert!(images(&ft).is_empty());
 }
 
 #[test]
-fn test_backtick_fence_in_code_is_escaped() {
-    // Source contains a triple-backtick run, so the fence must be longer.
+fn test_backticks_in_code_are_stored_verbatim() {
+    // Source containing a triple-backtick run is stored verbatim in the code
+    // block; there is no fence to escape, so it cannot break out.
     let json = r#"{
         "nbformat": 4,
         "cells": [
@@ -234,34 +290,33 @@ fn test_backtick_fence_in_code_is_escaped() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
-    assert!(
-        md.starts_with("````\n"),
-        "fence should be 4 backticks: {md:?}"
-    );
-    assert!(
-        md.ends_with("\n````"),
-        "closing fence should be 4 backticks: {md:?}"
-    );
+    let ft = convert(json);
+    let blocks = code_blocks(&ft);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].code, "s = \"\"\"```\"");
 }
 
 #[test]
 fn test_empty_notebook_is_ok() {
     let json = r#"{"nbformat": 4, "cells": []}"#;
-    let md = ipynb_to_markdown(json).expect("should convert");
-    assert_eq!(md, "");
+    let ft = convert(json);
+    assert!(
+        ft.lines.is_empty(),
+        "expected no lines, got: {:?}",
+        ft.lines
+    );
 }
 
 #[test]
 fn test_malformed_json_is_error() {
-    let result = ipynb_to_markdown("{ not valid json");
+    let result = ipynb_to_formatted_text("{ not valid json", false);
     assert!(matches!(result, Err(IpynbError::Parse(_))));
 }
 
 #[test]
 fn test_non_v4_notebook_is_error() {
     let json = r#"{"nbformat": 3, "cells": []}"#;
-    let result = ipynb_to_markdown(json);
+    let result = ipynb_to_formatted_text(json, false);
     assert!(matches!(
         result,
         Err(IpynbError::UnsupportedFormat { nbformat: Some(3) })
@@ -273,7 +328,7 @@ fn test_missing_nbformat_is_error() {
     // Arbitrary JSON that lacks an nbformat field must not render as a blank
     // notebook; it should error so the caller falls back to raw content.
     let json = r#"{"some": "json", "cells": []}"#;
-    let result = ipynb_to_markdown(json);
+    let result = ipynb_to_formatted_text(json, false);
     assert!(matches!(
         result,
         Err(IpynbError::UnsupportedFormat { nbformat: None })
@@ -290,9 +345,12 @@ fn test_raw_cell_rendered_as_plain_block() {
         ]
     }"#;
 
-    let md = ipynb_to_markdown(json).expect("should convert");
+    let ft = convert(json);
+    let blocks = code_blocks(&ft);
+    assert_eq!(blocks.len(), 1);
     // Raw cells are not tagged with the kernel language.
-    assert_eq!(md, "```\nraw content\n```");
+    assert_eq!(blocks[0].lang, "");
+    assert_eq!(blocks[0].code, "raw content");
 }
 
 #[test]
@@ -313,66 +371,66 @@ fn test_truncate_chars_respects_char_boundary() {
 #[test]
 fn test_oversized_text_output_is_truncated() {
     // A pathologically large stream output is truncated rather than rendered in
-    // full, so a single cell can't bloat the buffer (PRODUCT invariant 12).
+    // full, so a single cell can't bloat the buffer.
     let big = "a".repeat(MAX_TEXT_OUTPUT_CHARS + 100);
     let json = format!(
         r#"{{"nbformat": 4, "cells": [{{"cell_type": "code", "source": "x", "outputs": [{{"output_type": "stream", "name": "stdout", "text": "{big}"}}]}}]}}"#
     );
 
-    let md = ipynb_to_markdown(&json).expect("should convert");
+    let ft = convert(&json);
+    let blocks = code_blocks(&ft);
+    let output = &blocks[1].code;
     assert!(
-        md.contains("[output truncated]"),
+        output.contains("[output truncated]"),
         "expected truncation marker"
     );
     // The rendered output is bounded near the limit, not the full oversized size.
     assert!(
-        md.chars().count() <= MAX_TEXT_OUTPUT_CHARS + 200,
+        output.chars().count() <= MAX_TEXT_OUTPUT_CHARS + 200,
         "output should be truncated near the limit, got {} chars",
-        md.chars().count()
+        output.chars().count()
     );
 }
 
 #[test]
 fn test_oversized_image_is_omitted_with_placeholder() {
     // An embedded image larger than the cap is replaced with a visible
-    // placeholder rather than embedded (PRODUCT invariant 12).
+    // placeholder rather than embedded.
     let big = "A".repeat(MAX_IMAGE_DATA_CHARS + 1);
     let json = format!(
         r#"{{"nbformat": 4, "cells": [{{"cell_type": "code", "source": "plot()", "outputs": [{{"output_type": "display_data", "data": {{"image/png": "{big}"}}, "metadata": {{}}}}]}}]}}"#
     );
 
-    let md = ipynb_to_markdown(&json).expect("should convert");
+    let ft = convert(&json);
     assert!(
-        md.contains("[output image omitted: exceeds size limit]"),
+        images(&ft).is_empty(),
+        "oversized image should not be embedded"
+    );
+    assert!(
+        ft.raw_text()
+            .contains("[output image omitted: exceeds size limit]"),
         "expected placeholder for oversized image"
     );
-    assert!(
-        !md.contains("data:image/png;base64,"),
-        "oversized image should not be embedded as a data URI"
-    );
 }
 
 #[test]
-fn test_raw_fallback_fences_content_verbatim() {
-    // Content that is not a parseable notebook is wrapped in a fenced block so
-    // any Markdown/HTML inside it is shown verbatim, not interpreted.
+fn test_raw_fallback_holds_content_verbatim() {
+    // Content that is not a parseable notebook is placed in a single json code
+    // block so any Markdown/HTML inside it is shown verbatim, not interpreted.
     let raw = "{ \"nbformat\": 4, # Heading <b>bold</b>";
-    let md = raw_fallback_markdown(raw);
-    assert!(md.starts_with("```json\n"), "should open a json fence: {md:?}");
-    assert!(md.ends_with("\n```"), "should close the fence: {md:?}");
-    assert!(
-        md.contains("# Heading <b>bold</b>"),
-        "raw content should be preserved verbatim: {md:?}"
-    );
+    let ft = raw_fallback_formatted_text(raw);
+    let blocks = code_blocks(&ft);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].lang, "json");
+    assert_eq!(blocks[0].code, raw);
 }
 
 #[test]
-fn test_raw_fallback_adapts_fence_for_backticks() {
-    // Raw content containing a triple-backtick run gets a longer fence so it
-    // cannot break out of the code block.
-    let md = raw_fallback_markdown("```");
-    assert!(
-        md.starts_with("````json\n"),
-        "fence should be 4 backticks: {md:?}"
-    );
+fn test_raw_fallback_handles_backticks_verbatim() {
+    // Raw content containing a triple-backtick run is stored verbatim; there is
+    // no fence for it to break out of.
+    let ft = raw_fallback_formatted_text("```");
+    let blocks = code_blocks(&ft);
+    assert_eq!(blocks.len(), 1);
+    assert_eq!(blocks[0].code, "```");
 }

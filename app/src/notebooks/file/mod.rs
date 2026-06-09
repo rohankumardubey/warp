@@ -65,8 +65,6 @@ use crate::workflows::{WorkflowSource, WorkflowType};
 use crate::workspace::ActiveSession;
 use crate::{cmd_or_ctrl_shift, safe_warn, send_telemetry_from_ctx};
 
-mod ipynb;
-
 /// Display mode for markdown files shown via the header segmented control.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MarkdownDisplayMode {
@@ -330,47 +328,27 @@ impl FileNotebookView {
         ctx.focus(&self.editor);
     }
 
-    /// Reset the rich text contents based on the given Markdown content.
+    /// Reset the rich text contents based on the given file content.
     ///
-    /// For Jupyter notebooks (when the feature is enabled), the JSON is first
-    /// converted to Markdown; on conversion failure we fall back to the raw
-    /// content so the user never sees a blank view.
+    /// For Jupyter notebooks (when the feature is enabled), the JSON is
+    /// converted directly into formatted text via [`RichTextEditorView::reset_with_ipynb`];
+    /// on conversion failure the raw content is shown verbatim so the user never
+    /// sees a blank view. All other files are reset as Markdown.
     pub fn set_content(&mut self, content: &str, ctx: &mut ViewContext<Self>) {
         let doc_path = self.file_state.local_path().map(|p| p.to_path_buf());
-        let converted = self.maybe_render_ipynb(content);
-        let content = converted.as_deref().unwrap_or(content);
+        let render_as_ipynb =
+            FeatureFlag::JupyterNotebookRendering.is_enabled() && self.is_jupyter_notebook_file();
         self.editor.update(ctx, |editor, ctx| {
-            editor.reset_with_markdown(content, ctx);
+            if render_as_ipynb {
+                editor.reset_with_ipynb(content, ctx);
+            } else {
+                editor.reset_with_markdown(content, ctx);
+            }
             // Set the document path for resolving relative image paths
             editor.model().update(ctx, |model, ctx| {
                 model.set_document_path(doc_path, ctx);
             });
         });
-    }
-
-    /// If the open file is a Jupyter notebook and the feature is enabled,
-    /// convert its JSON `content` to Markdown. When conversion fails, returns a
-    /// fenced raw fallback so the contents are shown verbatim rather than
-    /// re-interpreted as Markdown. Returns `None` (so the caller uses the raw
-    /// content unchanged) only when the file is not a notebook or the feature
-    /// is disabled.
-    fn maybe_render_ipynb(&self, content: &str) -> Option<String> {
-        if !FeatureFlag::JupyterNotebookRendering.is_enabled() || !self.is_jupyter_notebook_file() {
-            return None;
-        }
-        match ipynb::ipynb_to_markdown(content) {
-            Ok(markdown) => Some(markdown),
-            Err(err) => {
-                safe_warn!(
-                    safe: ("Failed to render Jupyter notebook; showing raw contents"),
-                    full: ("Failed to render Jupyter notebook: {err}")
-                );
-                // Show the raw notebook contents verbatim as a fenced code block
-                // rather than feeding the JSON back through the Markdown renderer,
-                // which could interpret notebook strings as Markdown/HTML.
-                Some(ipynb::raw_fallback_markdown(content))
-            }
-        }
     }
 
     #[cfg(feature = "local_fs")]
