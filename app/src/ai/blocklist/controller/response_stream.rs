@@ -61,8 +61,8 @@ pub struct ResponseStream {
 
     /// Whether we should attempt to resume the conversation after the stream finishes.
     ///
-    /// This is set when we receive a retryable error that is not being retried in-request
-    /// and `can_attempt_resume_on_error` is true.
+    /// This is set when we receive a transient network/server error that is not being
+    /// retried in-request and `can_attempt_resume_on_error` is true.
     should_resume_conversation_after_stream_finished: bool,
 
     /// Unique, internal id for the current request.
@@ -298,13 +298,18 @@ impl ResponseStream {
                     return;
                 }
 
-                // If the error is retryable but we're not retrying in-request (because client
-                // actions were already received, the retry budget is exhausted, or we're
-                // offline), signal that the controller should resume the conversation after the
-                // stream completes. Unlike an in-request retry (which re-sends the same request
-                // and is unsafe once actions have executed), a resume sends a fresh
-                // ResumeConversation request and is safe at any point.
-                let should_attempt_resume = is_retryable && self.can_attempt_resume_on_error;
+                // If the error is a transient network/server failure but we're not retrying
+                // in-request (because client actions were already received, the retry budget is
+                // exhausted, or we're offline), signal that the controller should resume the
+                // conversation after the stream completes. Unlike an in-request retry (which
+                // re-sends the same request and is unsafe once actions have executed), a resume
+                // sends a fresh ResumeConversation request and is safe at any point.
+                //
+                // Note this is narrower than `is_retryable`: application-level failures like
+                // quota limits are retried in-request but would fail a resume identically, so
+                // they end the conversation instead.
+                let should_attempt_resume =
+                    e.is_transient_failure() && self.can_attempt_resume_on_error;
                 if should_attempt_resume {
                     self.should_resume_conversation_after_stream_finished = true;
                 }

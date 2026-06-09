@@ -2306,6 +2306,14 @@ impl BlocklistAIController {
             handle.abort();
         }
 
+        // Passive background requests (auto code diffs, passive suggestion triggers) never
+        // auto-resume: a resume would issue a fresh turn on a conversation the user never
+        // sees. Enforce this here so every entry point is covered.
+        let is_passive_request = request_input
+            .all_inputs()
+            .any(|input| input.is_passive_request());
+        let can_attempt_resume_on_error = can_attempt_resume_on_error && !is_passive_request;
+
         // Make sure there's no existing response stream for the conversation. If
         // there is, something has gone wrong.
         if self
@@ -2393,10 +2401,6 @@ impl BlocklistAIController {
                 ctx,
             );
         });
-
-        let is_passive_request = request_input
-            .all_inputs()
-            .any(|input| input.is_passive_request());
 
         for input in request_input.all_inputs() {
             if let AIAgentInput::UserQuery {
