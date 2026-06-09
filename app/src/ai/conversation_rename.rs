@@ -87,6 +87,7 @@ fn conversation_title_matches<T: View>(
         .is_some_and(|current_title| current_title == title)
 }
 
+/// Trims and validates a requested conversation title before renaming.
 fn validate_conversation_title<T: View>(title: String, ctx: &mut ViewContext<T>) -> Option<String> {
     let title = title.trim();
     if title.is_empty() {
@@ -110,6 +111,7 @@ fn validate_conversation_title<T: View>(title: String, ctx: &mut ViewContext<T>)
     Some(title.to_owned())
 }
 
+/// Starts an optimistic rename for a loaded local conversation.
 fn begin_loaded_conversation_rename<T: View>(
     conversation_id: AIConversationId,
     title: String,
@@ -159,6 +161,7 @@ fn begin_loaded_conversation_rename<T: View>(
     );
 }
 
+/// Shows the user-facing error for a rename that could not be started.
 fn show_begin_error_toast<T: View>(
     err: BeginConversationRenameError,
     conversation_not_found_message: &'static str,
@@ -179,6 +182,7 @@ fn show_begin_error_toast<T: View>(
     show_error_toast(message.to_owned(), ctx);
 }
 
+/// Shows a rename-related error toast.
 fn show_error_toast<T: View>(message: String, ctx: &mut ViewContext<T>) {
     let window_id = ctx.window_id();
     ToastStack::handle(ctx).update(ctx, |toast_stack, ctx| {
