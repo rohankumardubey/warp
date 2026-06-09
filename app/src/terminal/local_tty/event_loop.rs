@@ -386,13 +386,6 @@ where
                                 .write_list
                                 .push_back(Cow::Owned(terminal_response_sequences));
                         }
-                        if state.needs_write() && can_write {
-                            if let Err(err) = self.pty_write(&mut state, &mut can_write) {
-                                error!("Error writing to PTY in event loop: {err}");
-                                break 'event_loop;
-                            }
-                        }
-                        continue;
                     }
 
                     for event in events.iter() {
