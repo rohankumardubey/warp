@@ -3,7 +3,7 @@ use std::time::{Duration, SystemTime};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 use warp_multi_agent_api as api;
-use warpui::{Entity, ModelContext, SingletonEntity};
+use warpui_core::{Entity, ModelContext, SingletonEntity};
 use warpui_extras::secure_storage::{self, AppContextExt};
 
 pub use crate::aws_credentials::{AwsCredentials, AwsCredentialsState};
