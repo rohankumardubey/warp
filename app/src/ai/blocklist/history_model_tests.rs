@@ -3443,6 +3443,7 @@ fn output_status_after_stream_error(error: RenderableAIError) -> Option<AmbientC
             )
         });
     });
+    // Two steps: a tail-expression `lock()` temporary would outlive `derived` (E0597).
     let derived = derived.lock().unwrap().take();
     derived
 }

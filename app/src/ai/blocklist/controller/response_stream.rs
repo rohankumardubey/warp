@@ -323,6 +323,8 @@ impl ResponseStream {
                         );
                         scope.set_tag("error", format!("{e:?}"));
                         scope.set_tag("is_retryable", e.is_retryable());
+                        scope.set_tag("is_transient_failure", e.is_transient_failure());
+                        scope.set_tag("will_attempt_resume", should_attempt_resume);
                         scope.set_tag("is_online", is_online);
                         scope.set_tag("retry_count", self.retry_count);
                     },
